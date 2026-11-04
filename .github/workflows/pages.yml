@@ -1,33 +1,32 @@
-# Deploys the voice bench (index.html + JS) to Cloudflare Pages with Wrangler
-# on every push to main. Needs two repository secrets:
-#   CLOUDFLARE_API_TOKEN   token with the "Cloudflare Pages: Edit" permission
-#   CLOUDFLARE_ACCOUNT_ID  your Cloudflare account ID
-name: Deploy to Cloudflare Pages
+# Publishes the voice bench (index.html + JS) to GitHub Pages on every push
+# to main. One-time setup: Settings > Pages > Source: "GitHub Actions".
+name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Collect the site files
         run: |
           mkdir site
           cp -r index.html app.js worklet.js dsp voices site/
-      - name: Create the Pages project (first run only)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create tr808 --production-branch=main
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy site --project-name=tr808 --branch=main
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
