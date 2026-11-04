@@ -81,6 +81,10 @@ tail is counted.
 - Envelope time constants that aren't readable from the schematic were set to
   hit the table's decay times.
 
+Hosting: `.github/workflows/pages.yml` deploys the bench to Cloudflare Pages
+(project `tr808`) with Wrangler on every push to `main`; it needs the repo
+secrets CLOUDFLARE_API_TOKEN (Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.
+
 Running locally: any static server, e.g. `python3 -m http.server`, then open
 `index.html` (module scripts and worklets don't load from `file://`).
 
