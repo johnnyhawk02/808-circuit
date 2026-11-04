@@ -14,6 +14,7 @@ class TR808Processor extends AudioWorkletProcessor {
       else if (m.t === 'master') this.kit.master = m.value;
       else if (m.t === 'model') this.kit.setModel(m.id, m.value);
       else if (m.t === 'bdModel') this.kit.setBdModel(m.value);
+      else if (m.t === 'sample') this.kit.loadSample(m.id, m.key, { sr: m.sr, data: m.data });
       else if (m.t === 'stop') this.kit.queue.length = 0;
     };
   }

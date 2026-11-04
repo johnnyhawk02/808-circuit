@@ -1,20 +1,34 @@
-// BD — Bass Drum (manual p.5, schematic p.9 "BASS DRUM", IC12 / Q39-Q44)
+// BD — Bass Drum, behavioural model (manual p.5, schematic p.9 "BASS DRUM").
 //
-// Circuit: a multi-feedback bridged-T network around 1/2 IC12 rings at
-// ~56 Hz. VR6 (DECAY) sets the feedback and therefore Q / ring time.
-// The trick that makes the 808 kick punchy: when the trigger arrives,
-// Q41-Q43 short R165, halving the network's time constant, so for the
-// first 4 ms (= 1/2 x 1/2 of the 16-18 ms period) it rings at twice the
-// frequency. Then Q42 turns back on and C39/R161 deliver a small
-// re-trigger pulse and the network continues at its own frequency.
-// TONE (VR5 + C45) is a low-pass on the output that also sets how much of
-// the trigger click gets through.
+// A cheap stand-in for voices/bd-circuit.js, fitted to its output
+// (test/fit.mjs): one zero-delay state-variable resonator plus a few
+// envelopes, instead of solving the network every sample.
 //
-// Manual check values: 18 ms (56 Hz); 3.5 Vpp normal / 10 Vpp accent;
-// decay 50 / 300 / 800 ms (short / mid / long).
-import { Voice, BridgedT, Pulse, OnePole, map3, qFromDecay, rail } from '../dsp/core.js';
+//  * The bridged-T around IC12a rings as a damped sine. For the first few ms
+//    after the trigger Q43 shorts R165, so the first half-cycle runs at about
+//    twice the frequency; then C39/R161 give it a second, smaller kick.
+//  * After that the pitch slides down from ~58 Hz to the network's resting
+//    ~49 Hz as C43 recovers; the slide is quicker at short DECAY settings.
+//  * VR6 (DECAY) sets the ring time; VR5 (TONE) with R171/C45 is a one-pole
+//    low-pass whose corner is computed from the parts, as in the circuit.
+//  * The trigger edge leaks through C40 into IC12 and gives the click.
+import { Voice, BridgedT, Pulse, OnePole, map3, qFromDecay, rail, clamp, lerp } from '../dsp/core.js';
 
 export const meta = { id: 'bd', name: 'Bass Drum', short: 'BD' };
+
+// Fitted to the circuit model (node test/fit.mjs bd ...).
+export const FIT = {
+  f0: 48.42,        // resting pitch, Hz
+  glide: 0.2355,   // extra pitch at the start, fraction of f0
+  glideK: 0.2073,  // glide time constant as a fraction of the decay time
+  d0: 0.04829, d5: 0.3033, d1: 0.8946, // ring time to 1/10 at DECAY 0 / mid / max, s
+  fast: 3.185,       // pitch multiple while Q43 shorts R165
+  seg: 0.00368,    // how long it lasts, s
+  kick1: 1.527,    // first pulse, x peak amplitude
+  kick2: 0.3734,    // C39 re-trigger pulse
+  click: 0.3478,    // C40 trigger feed-through
+  aN: 1.662, aA: 3.434,  // ring amplitude, normal / full accent, V
+};
 
 export class BD extends Voice {
   constructor(sr) {
@@ -24,44 +38,45 @@ export class BD extends Voice {
       { id: 'decay', name: 'Decay', def: 0.5 },
     ]);
     this.vppNormal = 3.5; this.vppAccent = 10;
-    this.f0 = 56;
     this.res = new BridgedT(sr);
     this.pulse = new Pulse(sr);
     this.tone = new OnePole(sr, 1000, 'lp');
     this.click = new OnePole(sr, 400, 'hp');
     this.t = 1e9; // samples since trigger
-    this.retrig = false;
     this.amp = 0;
     this.onParam();
   }
   onParam() {
-    const t10 = map3(this.p.decay, 0.05, 0.3, 0.8);
-    this.q = qFromDecay(this.f0, t10);
-    // VR5: about 180 Hz (dark, round) to 3 kHz (clicky).
-    this.tone.set(180 * Math.pow(3000 / 180, this.p.tone));
+    const F = FIT;
+    this.t10 = map3(this.p.decay, F.d0, F.d5, F.d1);
+    this.q = qFromDecay(F.f0, this.t10);
+    this.gCoef = Math.exp(-1 / (F.glideK * this.t10 * this.sr));
+    // VR5 10k C-taper || R172 10k, in series with R171 220R, into C45 .1u
+    const vr5 = 10e3 * (1 - clamp(this.p.tone, 0, 1)) ** 2 + 1;
+    const R = 220 + (vr5 * 10e3) / (vr5 + 10e3);
+    this.tone.set(1 / (2 * Math.PI * R * 0.1e-6));
   }
   trigger(accent = 0) {
-    this.amp = this.vpp(accent) / 2;
+    const F = FIT;
+    this.amp = lerp(F.aN * this.trimN, F.aA * this.trimA, clamp(accent, 0, 1));
     this.t = 0;
-    this.retrig = false;
-    // Q43 shorts R165: time constant halved -> 2 x f for 4 ms.
-    this.res.set(this.f0 * 2, this.q);
-    this.pulse.fire(this.res.pulseHeight(this.amp * 1.3, 1e-3), 1e-3);
-    this.trigV = this.amp;
+    this.g = 1;
+    this.res.set(F.f0 * (1 + F.glide) * F.fast, this.q);
+    this.pulse.fire(this.res.pulseHeight(this.amp * F.kick1, 1e-3), 1e-3);
+    this.segN = Math.max(1, Math.round(F.seg * this.sr));
   }
   render(out, n) {
-    const sr = this.sr, fourMs = 0.004 * sr, lvl = this.p.level;
+    const F = FIT, sr = this.sr, lvl = this.levelGain(), clickN = sr * 0.001;
     for (let i = 0; i < n; i++) {
-      if (this.t === Math.round(fourMs)) {
-        // Back to the inherent frequency; C39 via R161 re-triggers.
-        this.res.set(this.f0, this.q);
-        this.pulse.fire(this.res.pulseHeight(this.amp * 0.5, 1e-3), 1e-3);
+      if (this.t === this.segN) {
+        this.res.set(F.f0 * (1 + F.glide * this.g), this.q);
+        this.pulse.fire(this.res.pulseHeight(this.amp * F.kick2, 1e-3), 1e-3);
+      } else if (this.t > this.segN && (this.t & 15) === 0) {
+        this.res.set(F.f0 * (1 + F.glide * this.g), this.q);
       }
-      const x = this.pulse.tick();
-      let y = rail(this.res.tick(x));
-      // trigger feed-through (C40/R163 into IC12) gives the beater click
-      const clk = this.t < sr * 0.0015 ? this.trigV * 0.6 : 0;
-      y += this.click.tick(clk) * this.p.tone;
+      this.g *= this.gCoef;
+      let y = rail(this.res.tick(this.pulse.tick()));
+      y += this.click.tick(this.t < clickN ? this.amp * F.click : 0);
       out[i] += this.tone.tick(y) * lvl;
       this.t++;
     }

@@ -1,26 +1,33 @@
-// CY — Cymbal (manual p.6, schematic p.13 "CYMBAL", IC3 / Q16-Q20 / IC5 / Q25)
+// CY — Cymbal, behavioural model (manual p.6, schematic p.13 "CYMBAL").
 //
-// Circuit: all six Schmitt-trigger squares are summed and split by the two
-// bridged-T band-passes of IC3:
-//   high: C15/C16 .0033u, R58 560R, R59 82k  -> ~7.1 kHz, Q ~6
-//   low:  C13/C14 .0068u, R56 560R, R57 82k  -> ~3.4 kHz, Q ~6
-// The high band is split again into two swing-type VCAs (Fig. 12):
-//   Q16 - highest band, short fixed decay
-//   Q17 - slightly lower band, decay set by VR2 (CY DECAY) via Q20
-// The low band goes through its own swing VCA Q18, then the Q25 high-pass
-// (C48/C59 .0015u, R124 22k, R127 82k -> ~2.5 kHz).
-// The high side is cleaned up by the IC5 high-passes (~8.8 kHz).
-// VR4 (CY TONE) sets the level ratio between the bands.
-//
-// Manual check values: 3.5 Vpp normal / 7 Vpp accent; decay 350 / 800 / 1200 ms.
-// (The Q17 envelope times below are longer than those figures because the
-// table measures the whole voice, where the short Q16/Q18 parts set the peak.)
-import { Voice, BridgedT, Biquad, RCEnv, swingVCA, map3, rail, lerp } from '../dsp/core.js';
+// A cheap stand-in for voices/cy-circuit.js, fitted to its output
+// (test/fit.mjs). Same three-part structure as the circuit:
+//  * the six metal squares are split by the two IC3 bridged-T band-passes
+//    (~7 kHz high, ~3.4 kHz low)
+//  * three swing VCAs (Fig. 12): Q16 on the high band with a short envelope
+//    (C38), Q17 on the high band with the long, DECAY-controlled envelope
+//    (C40 + the Q20 tail from C41 / VR2), Q18 on the low band, fed from the
+//    same tail. Each envelope store charges through its diode and resistor,
+//    so the hit swells in over a few ms
+//  * the IC5 high-passes on the high side and the Q25 high-pass on the low
+//    side; VR4 (TONE) cross-fades the high and low sides into IC6
+import { Voice, BridgedT, Biquad, OnePole, swingVCA, map3, rail, decayCoef, lerp, clamp } from '../dsp/core.js';
+import { voicingTrigger } from './cb-circuit.js';
 
 export const meta = { id: 'cy', name: 'Cymbal', short: 'CY' };
 
-const HI = BridgedT.fromParts(560, 82e3, 0.0033e-6, 0.0033e-6);
-const LO = BridgedT.fromParts(560, 82e3, 0.0068e-6, 0.0068e-6);
+// Fitted to the circuit model (node test/fit.mjs cy ...).
+export const FIT = {
+  hiF: 8090, hiQ: 9.979, loF: 2918, loQ: 1.598,  // IC3 bands
+  vca: 69.96,                               // swing VCA gain
+  att: 0.002551,                            // envelope charge time constant, s
+  dA: 0.1517, d0: 0.2662, d5: 0.7431, d1: 1.12, dL: 0.3559, // Q16 / Q17 at DECAY 0, mid, max / Q18
+  eA: 0.2932, eB: 0.1548, eL: 0.4239,             // envelope volts per trigger volt
+  gB: 0.9679,                               // Q17 path gain relative to Q16
+  hpH: 13070, hpL: 4791,                  // IC5 / Q25 high-passes
+  hi0: 0.9695, hi1: 0.7736, lo0: 1.777, lo1: 2.133, // VR4: band gains at TONE 0 / max
+  lp: 7257, g: 0.3848,
+};
 
 export class CY extends Voice {
   constructor(sr, metal) {
@@ -31,32 +38,41 @@ export class CY extends Voice {
     ]);
     this.metal = metal;
     this.vppNormal = 3.5; this.vppAccent = 7;
-    this.bHi = new BridgedT(sr); this.bHi.set(HI.f, HI.q);
-    this.bLo = new BridgedT(sr); this.bLo.set(LO.f, LO.q);
-    this.e16 = new RCEnv(sr); this.e16.setDecay(0.08);
-    this.e17 = new RCEnv(sr);
-    this.e18 = new RCEnv(sr); this.e18.setDecay(0.25);
-    this.hp5a = new Biquad(sr, 'hp', 8800, 0.7);
-    this.hp5b = new Biquad(sr, 'hp', 8800, 0.7);
-    this.hp25 = new Biquad(sr, 'hp', 1 / (2 * Math.PI * Math.sqrt(22e3 * 82e3) * 1.5e-9), 0.97);
+    const F = FIT;
+    this.bHi = new BridgedT(sr); this.bHi.set(F.hiF, F.hiQ);
+    this.bLo = new BridgedT(sr); this.bLo.set(F.loF, F.loQ);
+    this.hpA = new Biquad(sr, 'hp', F.hpH, 0.7);
+    this.hpB = new Biquad(sr, 'hp', F.hpH, 0.7);
+    this.hpL = new Biquad(sr, 'hp', F.hpL, 0.97);
+    this.lp = new OnePole(sr, F.lp, 'lp');
+    this.aK = decayCoef(F.att, sr);
+    this.kA = decayCoef(F.dA, sr);
+    this.cA = this.cB = this.cL = 0; this.vA = this.vB = this.vL = 0;
     this.onParam();
   }
-  onParam() { this.e17.setDecay(map3(this.p.decay, 0.5, 1.2, 1.8)); }
+  onParam() {
+    const F = FIT, t = clamp(this.p.tone, 0, 1);
+    const dB = map3(this.p.decay, F.d0, F.d5, F.d1);
+    this.kB = decayCoef(dB, this.sr);
+    this.kL = decayCoef(F.dL * dB / F.d5, this.sr); // Q18 hangs off the same Q20 tail
+    this.gHi = lerp(F.hi0, F.hi1, t); this.gLo = lerp(F.lo0, F.lo1, t);
+  }
   trigger(accent = 0) {
-    const a = this.vpp(accent) / 2;
-    this.e16.fire(a); this.e17.fire(a); this.e18.fire(a);
+    const F = FIT, v = voicingTrigger(accent) * lerp(this.trimN, this.trimA, clamp(accent, 0, 1));
+    this.cA = v * F.eA; this.cB = v * F.eB; this.cL = v * F.eL;
   }
   render(out, n) {
-    const lvl = this.p.level, s = this.metal.sum, t = this.p.tone;
-    const gHi = lerp(0.5, 1.4, t), gLo = lerp(1.4, 0.4, t);
+    const F = FIT, lvl = this.levelGain() * F.g, s = this.metal.sum, aK = this.aK, g = F.vca;
     for (let i = 0; i < n; i++) {
       const hi = this.bHi.tick(s[i]), lo = this.bLo.tick(s[i]);
-      const v16 = swingVCA(this.e16.tick(), hi, 250);
-      const v17 = swingVCA(this.e17.tick(), hi, 250);
-      const v18 = swingVCA(this.e18.tick(), lo, 250);
-      const high = this.hp5a.tick(v16) + this.hp5b.tick(v17) * 1.6;
-      const low = this.hp25.tick(v18);
-      out[i] += rail((high * gHi + low * gLo) * 1.3) * lvl;
+      this.cA *= this.kA; this.cB *= this.kB; this.cL *= this.kL;
+      this.vA = this.cA + (this.vA - this.cA) * aK;
+      this.vB = this.cB + (this.vB - this.cB) * aK;
+      this.vL = this.cL + (this.vL - this.cL) * aK;
+      if (this.vB < 1e-5 && this.vL < 1e-5 && this.vA < 1e-5) { this.lp.tick(0); continue; }
+      const high = this.hpA.tick(swingVCA(this.vA, hi, g)) + this.hpB.tick(swingVCA(this.vB, hi, g)) * F.gB;
+      const low = this.hpL.tick(swingVCA(this.vL, lo, g));
+      out[i] += rail(this.lp.tick(high * this.gHi + low * this.gLo)) * lvl;
     }
   }
 }

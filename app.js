@@ -1,5 +1,7 @@
 // Test bench UI: pads, knobs, a 16-step sequencer and a scope.
 import { Kit, VOICES } from './dsp/kit.js';
+import { sampleFiles } from './dsp/sampler.js';
+import { parseWav } from './dsp/wav.js';
 
 // Circuit reference + the manual's check values for each card.
 const INFO = {
@@ -33,6 +35,7 @@ const send = (m) => {
     else if (m.t === 'set') fallbackKit.set(m.id, m.param, m.value);
     else if (m.t === 'master') fallbackKit.master = m.value;
     else if (m.t === 'model') fallbackKit.setModel(m.id, m.value);
+    else if (m.t === 'sample') fallbackKit.loadSample(m.id, m.key, { sr: m.sr, data: m.data });
     else if (m.t === 'stop') fallbackKit.queue.length = 0;
   }
 };
@@ -68,6 +71,7 @@ async function startAudio() {
   for (const id in state.values) for (const p in state.values[id]) send({ t: 'set', id, param: p, value: state.values[id][p] });
   send({ t: 'master', value: state.master });
   for (const id in state.models) send({ t: 'model', id, value: state.models[id] });
+  for (const id in loadedSamples) for (const [key, w] of loadedSamples[id]) send({ t: 'sample', id, key, sr: w.sr, data: w.data.slice() });
   document.getElementById('engine').textContent = `${state.engine} · ${ctx.sampleRate / 1000} kHz`;
   document.body.classList.add('live');
 }
@@ -99,7 +103,8 @@ for (const [i, v] of spec.entries()) {
     <p class="ref"><span>${circuit}</span><span>${check}</span></p>
     <div class="model" role="group" aria-label="${v.name} model">
       <button type="button" data-m="circuit" aria-pressed="true" title="Component-level simulation of every part on the schematic">Circuit</button>
-      <button type="button" data-m="behavioural" aria-pressed="false" title="The lighter behavioural model, calibrated to the manual">Behavioural</button>
+      <button type="button" data-m="behavioural" aria-pressed="false" title="Synthesized: oscillators, filters and envelopes fitted to the circuit model, at a fraction of the CPU">Synth</button>
+      <button type="button" data-m="sample" aria-pressed="false" title="Recordings of a real TR-808 (Michael Fischer, 1994), nearest knob setting">808</button>
     </div>
     <div class="knobs"></div>
     <div class="pads">
@@ -128,8 +133,28 @@ for (const [i, v] of spec.entries()) {
   for (const b of card.querySelectorAll('.model button')) b.addEventListener('click', () => setModel(v.id, b.dataset.m));
   grid.append(card);
 }
+// ---------------------------------------------------------------- 808 samples
+// Fetched per voice the first time its 808 button is picked; each recording
+// goes to the engine as raw PCM (the worklet can't fetch).
+const loadedSamples = {}, loading = {};
+function loadSamples(id) {
+  if (loadedSamples[id] || loading[id]) return loading[id];
+  const card = document.getElementById(`card-${id}`);
+  card.classList.add('loading');
+  loading[id] = Promise.all(sampleFiles().filter(([v]) => v === id).map(async ([, key, path]) => {
+    const r = await fetch(new URL(path, import.meta.url));
+    if (!r.ok) throw new Error(`${path}: ${r.status}`);
+    return [key, parseWav(await r.arrayBuffer())];
+  })).then((list) => {
+    loadedSamples[id] = list;
+    for (const [key, w] of list) send({ t: 'sample', id, key, sr: w.sr, data: w.data.slice() });
+  }).catch((err) => { console.warn('samples', id, err); card.classList.add('nosample'); })
+    .finally(() => { card.classList.remove('loading'); delete loading[id]; });
+  return loading[id];
+}
 function setModel(id, m) {
   state.models[id] = m;
+  if (m === 'sample') loadSamples(id);
   for (const b of document.querySelectorAll(`#card-${id} .model button`)) b.setAttribute('aria-pressed', b.dataset.m === m);
   send({ t: 'model', id, value: m });
   const all = Object.values(state.models);

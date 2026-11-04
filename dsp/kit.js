@@ -2,7 +2,8 @@
 // accurate trigger queue and the master bus. Host-agnostic (worklet,
 // ScriptProcessor or Node).
 import { MetalBank } from './metal.js';
-import { CALIBRATION } from './calibration.js';
+import { CALIBRATION, LEVEL } from './calibration.js';
+import { SampleVoice } from './sampler.js';
 import { BD } from '../voices/bd.js';
 import { MetalCircuit } from './metal-circuit.js';
 import { NoiseBus } from './noise.js';
@@ -43,10 +44,17 @@ export class Kit {
       const v = (this.voices[id] = new C(sr, this.metal));
       const c = CALIBRATION[id];
       if (c) { v.trimN = c[0]; v.trimA = c[1]; }
+      v.levelPts = LEVEL[id];
     }
     // Every voice exists twice: the behavioural model above and the
     // component-level circuit simulation. `model[id]` picks which one plays.
     this.behavioural = { ...this.voices };
+    // ...and as recordings of a real TR-808 (dsp/sampler.js), once loaded
+    this.sampled = {};
+    for (const [id] of VOICES) {
+      const v = (this.sampled[id] = new SampleVoice(sr, id, this.voices[id].params));
+      v.levelPts = LEVEL[id];
+    }
     this.shared = { noise: new NoiseBus(sr), metal: new MetalCircuit(sr) };
     this.circuit = {};
     if (opts.circuits !== false) for (const id in CIRCUITS) this.circuit[id] = new CIRCUITS[id](sr, this.shared);
@@ -64,13 +72,17 @@ export class Kit {
   }
   set(id, param, value) {
     this.behavioural[id]?.set(param, value);
+    this.sampled[id]?.set(param, value);
     this.circuit[id]?.set(param, value);
   }
+  // model: 'circuit' | 'behavioural' | 'sample'
   setModel(id, model) {
-    const m = model === 'behavioural' || !this.circuit[id] ? 'behavioural' : 'circuit';
+    const m = model === 'sample' ? 'sample' : model === 'behavioural' || !this.circuit[id] ? 'behavioural' : 'circuit';
     this.model[id] = m;
-    this.voices[id] = m === 'circuit' ? this.circuit[id] : this.behavioural[id];
+    this.voices[id] = m === 'circuit' ? this.circuit[id] : m === 'sample' ? this.sampled[id] : this.behavioural[id];
   }
+  // one recording: key is the knob positions from the file name ('5050', '')
+  loadSample(id, key, wav) { this.sampled[id]?.add(key, wav); }
   setAllModels(model) { for (const [id] of VOICES) this.setModel(id, model); }
   setBdModel(model) { this.setModel('bd', model); } // older hosts
   // when = absolute frame, or undefined for "now"
@@ -85,6 +97,7 @@ export class Kit {
       // behavioural OH is choked directly; the circuit OH is choked by the
       // circuit CH's C63 envelope, or, if CH plays behavioural, by a pulse
       this.behavioural.oh?.choke?.();
+      this.sampled.oh?.choke?.();
       if (this.model.ch !== 'circuit') this.circuit.oh?.choke?.();
     }
     v.trigger(accent);
@@ -115,10 +128,12 @@ export class Kit {
     sh.metal.render(n);
     const ids = this.solo ? [this.solo] : ORDER;
     for (const id of ids) this.voices[id].render(mix, n);
-    // the model that isn't selected finishes any tail it was playing
+    // the models that aren't selected finish any tail they were playing
     if (!this.solo) for (const [id] of VOICES) {
-      const other = this.model[id] === 'circuit' ? this.behavioural[id] : this.circuit[id];
-      if (other && (other.isCircuit ? other.awake : true)) other.render(mix, n);
+      for (const other of [this.behavioural[id], this.circuit[id], this.sampled[id]]) {
+        if (!other || other === this.voices[id]) continue;
+        if (other.isCircuit ? other.awake : other.isSample ? other.cur : true) other.render(mix, n);
+      }
     }
     const g = this.master * VOLT_SCALE;
     for (let i = 0; i < n; i++) {

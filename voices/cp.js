@@ -1,62 +1,66 @@
-// CP — Hand Clap (manual p.6 "CP/MA" + Fig. 13, schematic p.9, IC21-IC23 / Q69-Q73)
+// CP — Hand Clap, behavioural model (manual p.6 "CP/MA" + Fig. 13, schematic p.9).
 //
-// Circuit: white noise through the band-pass IC21 feeds two VCAs in parallel:
-//  * Q70 with a long, smooth envelope (C139/C143) -> the clap's "reverb" tail
-//  * IC22 (BA662 OTA) driven by a sawtooth envelope -> the clap itself
-// The sawtooth comes from the quad comparator IC23 (AN6912):
-//  1. The trigger opens a 30 ms window (R350/C140, Fig. 13-2).
-//  2. Inside the window C144 is slammed to full charge, then discharges
-//     through R365/D71. When it falls below the comparator threshold it is
-//     recharged again -> repeated teeth roughly every 10 ms (Fig. 13-3..5).
-//  3. When the window closes (pin 1 rises), R357/C141 differentiate the edge,
-//     Q73 fires once more, and C144 is left to discharge slowly: the last,
-//     longest burst (Fig. 13-6).
-// Q72/Q71 convert that voltage exponentially into the OTA's control current.
-// The result is the classic 3 quick slaps + 1 longer one (Fig. 13-7).
-//
-// Manual check values: 6 Vpp normal (the accent entry reads 2 Vpp, which
-// looks like a typo; accent is modelled like the other voices); decay 100 ms.
-import { Voice, Biquad, RCEnv, Noise, decayCoef, rail } from '../dsp/core.js';
+// A cheap stand-in for the CP half of voices/cpma-circuit.js, fitted to its
+// output (test/fit.mjs). Same signal flow, simple blocks:
+//  * white noise through the IC21 band-pass (~1.2 kHz)
+//  * the clap: the BA662 OTA multiplies the noise by an exponential of the
+//    C144 sawtooth. Inside the ~30 ms comparator window C144 is charged and
+//    dumped repeatedly (teeth every `tooth` s); when the window closes it is
+//    dumped once more and that last ramp decays slowly. The OTA's tanh input
+//    stage clips the noise a little, which brightens it
+//  * the "reverb": Q70 amplifies the same noise under a slower envelope
+//    (C139/C138), with the C146 roll-off on its collector
+//  * a little of the sawtooth itself leaks into the mix as a low thump
+import { Voice, Biquad, OnePole, Noise, rail, decayCoef, lerp, clamp } from '../dsp/core.js';
 
 export const meta = { id: 'cp', name: 'Hand Clap', short: 'CP' };
 
-const WINDOW = 0.030;     // 30 ms comparator window
-const TOOTH_TAU = 0.0045; // C144 fast discharge
-const THRESH = 0.1;       // recharge threshold -> ~10.4 ms teeth
-const TAIL_TAU = 0.014;   // slow discharge after the window
-const EXP_K = 3;          // Q72 exponential converter steepness
+// Fitted to the circuit model (node test/fit.mjs cp ...).
+export const FIT = {
+  bpF: 1952, bpQ: 0.8084,           // IC21 band-pass
+  drive: 2.087,                    // OTA input clipping
+  tooth: 0.013, win: 0.026,      // tooth period and comparator window, s
+  tTau: 0.007306, lTau: 0.04112,       // C144 decay inside the window / last ramp
+  expK: 0.7509,                       // Q71/Q72 exponential converter steepness
+  clap: 3.232,                       // clap level, V
+  vA: 0.1065, vAtt: 0.02253, vDec: 0.3146, vLp: 1068, // reverb level, attack, decay, C146 roll-off
+  thump: 0.2051,                    // sawtooth leak
+};
 
 export class CP extends Voice {
   constructor(sr) {
     super(sr, [{ id: 'level', name: 'Level', def: 0.8 }]);
-    this.vppNormal = 6; this.vppAccent = 10; // manual: 6 / 2 (see note)
+    this.vppNormal = 6; this.vppAccent = 10;
+    const F = FIT;
     this.noise = new Noise(1981);
-    this.bp = new Biquad(sr, 'bp', 1000, 1.6);   // IC21 band-pass
-    this.verb = new RCEnv(sr); this.verb.setDecay(0.13); // Q70
-    this.fast = decayCoef(TOOTH_TAU, sr);
-    this.slow = decayCoef(TAIL_TAU, sr);
-    this.v = 0; this.t = 1e9; this.inWindow = false;
+    this.bp = new Biquad(sr, 'bp', F.bpF, F.bpQ);
+    this.vLp = new OnePole(sr, F.vLp, 'lp');
+    this.thHp = new OnePole(sr, 20, 'hp');
+    this.fast = decayCoef(F.tTau, sr); this.slow = decayCoef(F.lTau, sr);
+    this.vAk = decayCoef(F.vAtt, sr); this.vDk = decayCoef(F.vDec, sr);
+    this.toothN = Math.max(1, Math.round(F.tooth * sr)); this.winN = Math.round(F.win * sr);
+    this.ek = Math.exp(F.expK) - 1;
+    this.saw = 0; this.t = 1e9; this.a = 0; this.vC = 0; this.vS = 0;
   }
   trigger(accent = 0) {
-    this.a = this.vpp(accent) / 2;
-    this.v = 1; this.t = 0; this.inWindow = true;
-    this.verb.fire(this.a * 0.5);
+    this.a = lerp(this.trimN, this.trimA, clamp(accent, 0, 1));
+    this.saw = 1; this.t = 0;
+    this.vC = this.a;
   }
   render(out, n) {
-    const lvl = this.p.level, win = WINDOW * this.sr, a = this.a || 0;
-    const ek = Math.exp(EXP_K) - 1;
+    const F = FIT, lvl = this.levelGain(), a = this.a, K = F.expK, ek = this.ek;
     for (let i = 0; i < n; i++) {
-      if (this.inWindow) {
-        this.v *= this.fast;
-        if (this.v < THRESH) this.v = 1;          // comparator recharges C144
-        if (this.t >= win) { this.inWindow = false; this.v = 1; } // Q73 last kick
-      } else {
-        this.v *= this.slow;
-      }
-      this.t++;
-      const saw = (Math.exp(EXP_K * this.v) - 1) / ek; // exponential converter
-      const nz = this.bp.tick(this.noise.white()) * 2.4;
-      out[i] += rail(nz * (saw * a + this.verb.tick())) * lvl;
+      const t = this.t++;
+      if (t < this.winN) { this.saw *= this.fast; if (t > 0 && t % this.toothN === 0) this.saw = 1; }
+      else { if (t === this.winN) this.saw = 1; this.saw *= this.slow; }
+      const g = (Math.exp(K * this.saw) - 1) / ek;
+      // reverb envelope: C139 charged by the hit, C138 follows it
+      this.vC *= this.vDk; this.vS = this.vC + (this.vS - this.vC) * this.vAk;
+      const nz = this.bp.tick(this.noise.white());
+      if (g < 1e-5 && this.vS < 1e-5) { this.thHp.tick(0); continue; }
+      const clap = Math.tanh(nz * F.drive) * g * a * F.clap;
+      const verb = this.vLp.tick(nz * this.vS * F.vA);
+      out[i] += rail(clap + verb + this.thHp.tick(this.saw * a * F.thump)) * lvl;
     }
   }
 }
