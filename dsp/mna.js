@@ -25,6 +25,15 @@ function clipOut(x, vsat) {
   return Math.sign(x) * (xl + w * t);
 }  // S across every junction, as in SPICE (1 nA per volt)
 
+// linearisation error of an exponential junction after a step dv, as an
+// equivalent voltage: nVt (e^u - 1 - u), u = dv / nVt
+const OLD_CONV = !!globalThis.MNA_OLD_CONV;
+function linErr(dv, nvt) {
+  const u = dv / nvt;
+  if (u > -0.5 && u < 0.5) return Math.abs(nvt * u * u * (0.5 + u * (1 / 6 + u * (1 / 24 + u / 120))));
+  return Math.abs(nvt * (Math.exp(Math.min(u, 80)) - 1 - u));
+}
+
 function pnjlim(vnew, vold, vt, vcrit) {
   if (vnew > vcrit && Math.abs(vnew - vold) > 2 * vt) {
     if (vold > 0) {
@@ -127,6 +136,16 @@ export class Circuit {
     for (const q of this.bjts) { q.lb = L(q.b); q.lc = L(q.c); q.le = L(q.e); }
     for (const o of this.opamps) { o.lp = L(o.p); o.lm = L(o.m); o.lo = L(o.o); }
     for (const d of this.dyn) { d.la = L(d.a); d.lb = d.fixed ? -1 : L(d.b); }
+    // sparsity pattern of the device stamps (local row, local column)
+    const pat = new Set(), pr = (r, cs) => { if (r < 0) return; for (const c of cs) if (c >= 0) pat.add(r * k + c); };
+    for (const d of this.diodes) if (!d.frozen) { pr(d.la, [d.la, d.lk]); pr(d.lk, [d.la, d.lk]); }
+    for (const q of this.bjts) if (!q.frozen) for (const r of [q.lb, q.lc, q.le]) pr(r, [q.lb, q.lc, q.le]);
+    for (const o of this.opamps) if (!o.lin) pr(o.lo, [o.lo, o.lp, o.lm]);
+    for (const d of this.dyn) { pr(d.la, [d.la, d.lb]); pr(d.lb, [d.la, d.lb]); }
+    const P = [...pat].sort((x, y) => x - y);
+    this.patIdx = Int32Array.from(P);                   // index into the k x k N
+    this.patRow = Int32Array.from(P, (x) => Math.floor(x / k));
+    this.patCol = Int32Array.from(P, (x) => x % k);
     this.K = Int32Array.from(K); this.k = k; this.nDev = this.diodes.length + this.bjts.length + this.opamps.length + this.dyn.length;
     this.Z = new Float64Array(this.n * k);      // G^-1 restricted to the K columns
     this.Zkk = new Float64Array(k * k);
@@ -134,6 +153,7 @@ export class Circuit {
     this.Ak = new Float64Array(k * k); this.wk = new Float64Array(k); this.bk = new Float64Array(k);
     this.perm = new Int32Array(this.n); this.permK = new Int32Array(k);
     this.y = new Float64Array(this.n); this.e = new Float64Array(this.n);
+    this.Gi = new Float64Array(this.n * this.n);       // G^-1, row major
   }
 
   _buildBase() {
@@ -184,13 +204,15 @@ export class Circuit {
     for (let i = 0; i < n; i++) if (M[i * n + i] === 0) M[i * n + i] = GMIN;
     // factor G (LU in place in this.A, row permutation in perm)
     if (anyBE) { this.A.set(M); this._factor(this.A, this.perm, n); }
-    // Z = G^-1 [e_K1 .. e_Kk]
-    const k = this.k, Z = this.Z;
-    for (let j = 0; j < k; j++) {
-      e.fill(0); e[this.K[j]] = 1;
+    // G^-1 explicitly (a matrix-vector product per sample is cheaper than
+    // the two triangular solves), and Z = G^-1 [e_K1 .. e_Kk]
+    const k = this.k, Z = this.Z, Gi = this.Gi;
+    for (let j = 0; j < n; j++) {
+      e.fill(0); e[j] = 1;
       this._lusolve(this.A, this.perm, n, e, y);
-      for (let i = 0; i < n; i++) Z[i * k + j] = y[i];
+      for (let i = 0; i < n; i++) Gi[i * n + j] = y[i];
     }
+    for (let j = 0; j < k; j++) { const g = this.K[j]; for (let i = 0; i < n; i++) Z[i * k + j] = Gi[i * n + g]; }
     for (let a = 0; a < k; a++) for (let j = 0; j < k; j++) this.Zkk[a * k + j] = Z[this.K[a] * k + j];
     this.dirty = false;
   }
@@ -249,44 +271,47 @@ export class Circuit {
 
   _newton(rb, maxIter, tol) {
     const n = this.n, v = this.v, k = this.k, K = this.K;
-    const y = this.y;
-    this._lusolve(this.A, this.perm, n, rb, y);   // linear response
+    const y = this.y, Gi = this.Gi;
+    // linear response y = G^-1 rb
+    for (let i = 0, r = 0; i < n; i++, r += n) {
+      let s = 0;
+      for (let j = 0; j < n; j++) s += Gi[r + j] * rb[j];
+      y[i] = s;
+    }
     let ok = true, it = 0;
     const w = this.wk;
     if (k > 0) {
       ok = false;
       const N = this.Nk, r = this.rk, Ak = this.Ak, bk = this.bk, Zkk = this.Zkk;
+      const pI = this.patIdx, pR = this.patRow, pC = this.patCol, np = pI.length, kk = k * k;
       for (; it < maxIter; it++) {
-        N.fill(0); r.fill(0);
+        for (let p = 0; p < np; p++) N[pI[p]] = 0;
+        for (let a = 0; a < k; a++) r[a] = 0;
         this._stampDyn(N, k);
         this._stampNonlinear(N, r, k);
-        // (I + N Zkk) w = r - N yK   (N is sparse: skip its zeros)
-        Ak.fill(0);
-        for (let a = 0; a < k; a++) {
-          Ak[a * k + a] = 1;
-          let s = r[a];
-          const row = a * k;
-          for (let m = 0; m < k; m++) {
-            const nm = N[row + m]; if (nm === 0) continue;
-            s -= nm * y[K[m]];
-            const zr = m * k;
-            for (let j = 0; j < k; j++) Ak[row + j] += nm * Zkk[zr + j];
-          }
-          bk[a] = s;
+        // (I + N Zkk) w = r - N yK, over the nonzeros of N only
+        for (let i = 0; i < kk; i++) Ak[i] = 0;
+        for (let a = 0; a < k; a++) { Ak[a * k + a] = 1; bk[a] = r[a]; }
+        for (let p = 0; p < np; p++) {
+          const nm = N[pI[p]]; if (nm === 0) continue;
+          const m = pC[p], row = pR[p] * k, zr = m * k;
+          bk[pR[p]] -= nm * y[K[m]];
+          for (let j = 0; j < k; j++) Ak[row + j] += nm * Zkk[zr + j];
         }
         this._factor(Ak, this.permK, k);
         this._lusolve(Ak, this.permK, k, bk, w);
         for (let a = 0; a < k; a++) {
           let s = y[K[a]];
-          for (let j = 0; j < k; j++) s += Zkk[a * k + j] * w[j];
+          const zr = a * k;
+          for (let j = 0; j < k; j++) s += Zkk[zr + j] * w[j];
           v[K[a]] = s;
         }
         if (this._linError() < tol) { ok = true; break; }
       }
       const Z = this.Z;
-      for (let i = 0; i < n; i++) {
+      for (let i = 0, zr = 0; i < n; i++, zr += k) {
         let s = y[i];
-        for (let j = 0; j < k; j++) s += Z[i * k + j] * w[j];
+        for (let j = 0; j < k; j++) s += Z[zr + j] * w[j];
         v[i] = s;
       }
     } else v.set(y);
@@ -338,9 +363,14 @@ export class Circuit {
     }
   }
 
-  // Converged when every junction is at its linearisation point: either
-  // the voltage moved less than tol, or the current error that movement
-  // causes (g * dv) is below ~1 nA (junctions that are barely conducting).
+  // Converged when the linearised junction currents the last solve used
+  // match the true (exponential) currents at the voltages it found, to
+  // within tol volts of equivalent junction voltage (or ~1 nA x tol/1e-5
+  // for junctions that are barely conducting). The error of the
+  // linearisation is quadratic in the step, f(u) = nVt (e^u - 1 - u) with
+  // u = dv / nVt, so a small step is accepted without another solve.
+  // (OLD_CONV: the earlier test, which needed the step itself below tol and
+  // so always took one more solve than necessary.)
   _linError() {
     let e = 0, x;
     const v = this.v;
@@ -349,14 +379,17 @@ export class Circuit {
       const d = D[i];
       if (d.frozen) continue;
       const dv = Math.abs((d.a >= 0 ? v[d.a] : 0) - (d.k >= 0 ? v[d.k] : 0) - d.vd);
-      x = dv * d.gd * 1e4; if (x > dv) x = dv; if (x > e) e = x;
+      const f = OLD_CONV ? dv : linErr((d.a >= 0 ? v[d.a] : 0) - (d.k >= 0 ? v[d.k] : 0) - d.vd, d.nvt);
+      x = f * d.gd * 1e4; if (x > f) x = f; if (x > e) e = x;
     }
     for (let i = 0; i < Q.length; i++) {
       const q = Q[i];
       if (q.frozen) continue;
       const vb = q.b >= 0 ? v[q.b] : 0;
-      const dbe = Math.abs(q.pol * (vb - (q.e >= 0 ? v[q.e] : 0)) - q.vbe);
-      const dbc = Math.abs(q.pol * (vb - (q.c >= 0 ? v[q.c] : 0)) - q.vbc);
+      const ube = q.pol * (vb - (q.e >= 0 ? v[q.e] : 0)) - q.vbe;
+      const ubc = q.pol * (vb - (q.c >= 0 ? v[q.c] : 0)) - q.vbc;
+      const dbe = OLD_CONV ? Math.abs(ube) : linErr(ube, VT);
+      const dbc = OLD_CONV ? Math.abs(ubc) : linErr(ubc, VT);
       x = dbe * q.gf * 1e4; if (x > dbe) x = dbe; if (x > e) e = x;
       x = dbc * q.gr * 1e4; if (x > dbc) x = dbc; if (x > e) e = x;
     }

@@ -40,6 +40,8 @@ test/measure.mjs      both models vs the manual's voice-check table; writes rend
 test/circuit-check.mjs one circuit voice: Vpp, peaks, decay, CPU
 test/bd-compare.mjs   BD decay sweep, both models
 test/cpu.mjs          real-time cost of a busy pattern (circuit or behavioural)
+test/profile.mjs      circuit kit cost per voice and per stage (Newton passes, rebuilds)
+test/regress.mjs      circuit renders vs a saved reference (for solver changes)
 ```
 
 ## Voice API
@@ -143,8 +145,32 @@ bursts dropping to ~0.5 Vpp between them), Q18's bias
 parts (CY) copied from Q16, the BA662 bias pin.
 
 Cost (Node, one core, 48 kHz): a single voice is 2-50% of a core; the bench's
-demo pattern needs about 110-130% and a hit on all 16 voices every bar about
-170-190% (measured on this cloud machine; a fast desktop may manage it). The
+demo pattern needs about 140% and the dense all-voice pattern in
+`test/cpu.mjs` about 210-220% (measured on this cloud machine, where the
+same numbers before the Nov 5 solver changes were 165% and 255%; a fast
+desktop may manage it). `node test/profile.mjs` breaks the cost down by voice
+and stage. The
 page shows the DSP load and suggests switching the heaviest voices (CY, MA, CP,
 SD, CB) to Behavioural. The behavioural kit uses about 14%. Circuit voices
 sleep 0.2 s after their output goes quiet.
+
+### Changing the solver
+
+`dsp/mna.js` stops Newton when the linearised junction currents of the last
+solve match the true exponential currents at the voltages it found (the
+linearisation error, which shrinks with the square of the step), rather than
+when the step itself is below the tolerance. That accepts most samples one
+solve earlier and lands closer to a fully converged answer.
+
+Before and after a solver change:
+
+    node test/regress.mjs save                     # reference from the current code
+    REF=truth TOL_SCALE=0.01 node test/regress.mjs save   # near-exact reference
+    ...change dsp/mna.js...
+    node test/regress.mjs                          # vs the saved reference
+    REF=truth node test/regress.mjs                # vs the near-exact one
+    node test/regress.mjs alt                      # hit-to-hit spread of each voice
+
+The metal and noise voices (SD, CP, MA, CB, CY, OH, CH) are sensitive to the
+solver tolerance at the waveform level, so for them judge the envelope and
+spectrum columns against the `alt` spread, not the waveform error.

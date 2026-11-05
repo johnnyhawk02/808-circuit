@@ -16,7 +16,10 @@ if (which === 'demo') { for (const k in pat) delete pat[k]; Object.assign(pat, D
 const step = SR * 60 / 120 / 4, bars = 8;
 for (let b = 0; b < bars; b++) for (let s = 0; s < 16; s++) for (const [id, p] of Object.entries(pat)) if (p[s] === 'x') kit.trigger(id, s % 4 === 0 ? 1 : 0, Math.round((b * 16 + s) * step));
 const n = Math.round(bars * 16 * step), out = new Float32Array(128);
-const t0 = performance.now(); let worst = 0;
-for (let i = 0; i < n; i += 128) { const t = performance.now(); kit.render(out, 128); worst = Math.max(worst, performance.now() - t); }
+const t0 = performance.now(); let worst = 0, worstLate = 0;
+for (let i = 0; i < n; i += 128) {
+  const t = performance.now(); kit.render(out, 128); const d = performance.now() - t;
+  worst = Math.max(worst, d); if (i > 2 * SR) worstLate = Math.max(worstLate, d); // after JIT warm-up
+}
 const ms = performance.now() - t0, secs = n / SR;
-console.log(`${model} (${which}): ${(ms / 1000).toFixed(2)} s CPU for ${secs.toFixed(1)} s audio = ${(100 * ms / 1000 / secs).toFixed(0)}% of one core; worst 128-frame block ${worst.toFixed(2)} ms (budget ${(128 / SR * 1000).toFixed(2)} ms)`);
+console.log(`${model} (${which}): ${(ms / 1000).toFixed(2)} s CPU for ${secs.toFixed(1)} s audio = ${(100 * ms / 1000 / secs).toFixed(0)}% of one core; worst 128-frame block ${worst.toFixed(2)} ms (${worstLate.toFixed(2)} ms after the first 2 s) (budget ${(128 / SR * 1000).toFixed(2)} ms)`);
