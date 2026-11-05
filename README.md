@@ -42,6 +42,8 @@ test/bd-compare.mjs   BD decay sweep, both models
 test/cpu.mjs          real-time cost of a busy pattern (circuit or behavioural)
 test/profile.mjs      circuit kit cost per voice and per stage (Newton passes, rebuilds)
 test/regress.mjs      circuit renders vs a saved reference (for solver changes)
+test/cache-render.mjs renders the cached circuit hits into cache/
+test/cache-check.mjs  cached kit: size, CPU
 ```
 
 ## Voice API
@@ -174,3 +176,18 @@ Before and after a solver change:
 The metal and noise voices (SD, CP, MA, CB, CY, OH, CH) are sensitive to the
 solver tolerance at the waveform level, so for them judge the envelope and
 spectrum columns against the `alt` spread, not the waveform error.
+
+### Cached circuit hits
+
+Each voice's third mode, **Cached**, plays hits the circuit model rendered
+offline: 16 normal and 16 accented hits per voice at the default knob
+settings, each with the noise generator and metal oscillators in another
+state and the trigger level +-1.5%. Every trigger picks one at random (never
+the same twice in a row). LEVEL follows the circuit's own level curve, DECAY
+(where the voice has one) shortens the hit with a fade below its default,
+pitch and tone knobs are ignored, and a closed hat chokes a cached open hat.
+The hits are stored at 32 kHz, 16-bit (`cache/<id>.wav` + `cache/index.json`):
+21 MB in all, loaded per voice the first time Cached is picked, about 43 MB in
+memory. The dense pattern costs about 5% of a core instead of ~215%.
+Re-render after a circuit change with `node test/cache-render.mjs [ids]`
+(about 3 minutes for all 16).

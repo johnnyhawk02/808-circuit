@@ -1,5 +1,6 @@
 // Test bench UI: pads, knobs, a 16-step sequencer and a scope.
 import { Kit, VOICES } from './dsp/kit.js';
+import { readWav } from './dsp/cache.js';
 
 // Circuit reference + the manual's check values for each card.
 const INFO = {
@@ -26,13 +27,14 @@ const specKit = new Kit(48000, { circuits: false }); // main-thread copy, only f
 const spec = specKit.spec();
 
 let ctx = null, node = null, analyser = null, fallbackKit = null;
-const send = (m) => {
-  if (node?.port) node.port.postMessage(m);
+const send = (m, transfer) => {
+  if (node?.port) node.port.postMessage(m, transfer ?? []);
   else if (fallbackKit) {
     if (m.t === 'trig') fallbackKit.trigger(m.id, m.accent, m.when != null ? Math.round(m.when * ctx.sampleRate) : undefined);
     else if (m.t === 'set') fallbackKit.set(m.id, m.param, m.value);
     else if (m.t === 'master') fallbackKit.master = m.value;
     else if (m.t === 'model') fallbackKit.setModel(m.id, m.value);
+    else if (m.t === 'cache') fallbackKit.loadCache(m.id, m.info, new Int16Array(m.pcm));
     else if (m.t === 'stop') fallbackKit.queue.length = 0;
   }
 };
@@ -67,7 +69,9 @@ async function startAudio() {
   // push current knob state into the engine
   for (const id in state.values) for (const p in state.values[id]) send({ t: 'set', id, param: p, value: state.values[id][p] });
   send({ t: 'master', value: state.master });
-  for (const id in state.models) send({ t: 'model', id, value: state.models[id] });
+  for (const id in state.models) {
+    if (state.models[id] === 'cached') loadCached(id); else send({ t: 'model', id, value: state.models[id] });
+  }
   document.getElementById('engine').textContent = `${state.engine} · ${ctx.sampleRate / 1000} kHz`;
   document.body.classList.add('live');
 }
@@ -100,6 +104,7 @@ for (const [i, v] of spec.entries()) {
     <div class="model" role="group" aria-label="${v.name} model">
       <button type="button" data-m="circuit" aria-pressed="true" title="Component-level simulation of every part on the schematic">Circuit</button>
       <button type="button" data-m="behavioural" aria-pressed="false" title="The lighter behavioural model, calibrated to the manual">Behavioural</button>
+      <button type="button" data-m="cached" aria-pressed="false" title="16 normal + 16 accented hits rendered by the circuit at the default knobs, one picked at random per hit. Level and Decay work; pitch and tone knobs don't. Almost no CPU.">Cached</button>
     </div>
     <div class="knobs"></div>
     <div class="pads">
@@ -131,11 +136,31 @@ for (const [i, v] of spec.entries()) {
 function setModel(id, m) {
   state.models[id] = m;
   for (const b of document.querySelectorAll(`#card-${id} .model button`)) b.setAttribute('aria-pressed', b.dataset.m === m);
-  send({ t: 'model', id, value: m });
+  if (m === 'cached') loadCached(id); else send({ t: 'model', id, value: m });
   const all = Object.values(state.models);
   for (const b of document.querySelectorAll('#all-models button')) b.setAttribute('aria-pressed', all.every((x) => x === b.dataset.m));
 }
 for (const b of document.querySelectorAll('#all-models button')) b.addEventListener('click', () => { for (const v of spec) setModel(v.id, b.dataset.m); });
+
+// Cached circuit hits: fetched per voice the first time Cached is picked
+// (cache/<id>.wav, 32 kHz 16-bit), then handed to the audio engine.
+let cacheIndex = null;
+const cacheSent = new Set(), cacheLoading = {};
+async function loadCached(id) {
+  if (!ctx) return; // startAudio() loads it
+  if (!cacheSent.has(id)) {
+    cacheLoading[id] ??= (async () => {
+      cacheIndex ??= fetch(new URL('./cache/index.json', import.meta.url)).then((r) => r.json());
+      const info = (await cacheIndex)[id];
+      const buf = await (await fetch(new URL(`./cache/${id}.wav`, import.meta.url))).arrayBuffer();
+      const pcm = readWav(buf).buffer;
+      send({ t: 'cache', id, info, pcm }, [pcm]);
+      cacheSent.add(id);
+    })().catch((err) => { console.warn('cache load failed', id, err); delete cacheLoading[id]; });
+    await cacheLoading[id];
+  }
+  if (state.models[id] === 'cached') send({ t: 'model', id, value: 'cached' });
+}
 
 // rendering load reported by the worklet (fraction of the real-time budget)
 const loadEl = document.getElementById('load'), warnEl = document.getElementById('overload');

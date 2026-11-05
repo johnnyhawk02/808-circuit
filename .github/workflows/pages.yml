@@ -23,7 +23,7 @@ jobs:
       - name: Collect the site files
         run: |
           mkdir site
-          cp -r index.html app.js worklet.js dsp voices site/
+          cp -r index.html app.js worklet.js dsp voices cache site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

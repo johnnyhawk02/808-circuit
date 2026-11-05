@@ -7,6 +7,7 @@ import { BD } from '../voices/bd.js';
 import { MetalCircuit } from './metal-circuit.js';
 import { NoiseBus } from './noise.js';
 import { CIRCUITS } from '../voices/circuits.js';
+import { CachedVoice } from './cache.js';
 import { SD } from '../voices/sd.js';
 import { LT, MT, HT, LC, MC, HC } from '../voices/tom.js';
 import { RS } from '../voices/rs.js';
@@ -51,6 +52,10 @@ export class Kit {
     this.circuit = {};
     if (opts.circuits !== false) for (const id in CIRCUITS) this.circuit[id] = new CIRCUITS[id](sr, this.shared);
     if (this.circuit.oh && this.circuit.ch) this.circuit.oh.chokeFrom = this.circuit.ch;
+    // third model: hits pre-rendered by the circuit (dsp/cache.js), loaded
+    // per voice with loadCache()
+    this.cached = {};
+    for (const [id] of VOICES) this.cached[id] = new CachedVoice(sr, this.behavioural[id].params);
     this.model = {};
     for (const [id] of VOICES) this.setModel(id, 'circuit');
     this.master = 0.8;
@@ -65,12 +70,15 @@ export class Kit {
   set(id, param, value) {
     this.behavioural[id]?.set(param, value);
     this.circuit[id]?.set(param, value);
+    this.cached[id]?.set(param, value);
   }
   setModel(id, model) {
-    const m = model === 'behavioural' || !this.circuit[id] ? 'behavioural' : 'circuit';
+    const m = model === 'cached' && this.cached[id]?.loaded ? 'cached'
+      : model === 'behavioural' || model === 'cached' || !this.circuit[id] ? 'behavioural' : 'circuit';
     this.model[id] = m;
-    this.voices[id] = m === 'circuit' ? this.circuit[id] : this.behavioural[id];
+    this.voices[id] = this[m][id];
   }
+  loadCache(id, info, int16) { this.cached[id].load(info, int16); }
   setAllModels(model) { for (const [id] of VOICES) this.setModel(id, model); }
   setBdModel(model) { this.setModel('bd', model); } // older hosts
   // when = absolute frame, or undefined for "now"
@@ -85,6 +93,7 @@ export class Kit {
       // behavioural OH is choked directly; the circuit OH is choked by the
       // circuit CH's C63 envelope, or, if CH plays behavioural, by a pulse
       this.behavioural.oh?.choke?.();
+      this.cached.oh?.choke();
       if (this.model.ch !== 'circuit') this.circuit.oh?.choke?.();
     }
     v.trigger(accent);
@@ -115,10 +124,11 @@ export class Kit {
     sh.metal.render(n);
     const ids = this.solo ? [this.solo] : ORDER;
     for (const id of ids) this.voices[id].render(mix, n);
-    // the model that isn't selected finishes any tail it was playing
-    if (!this.solo) for (const [id] of VOICES) {
-      const other = this.model[id] === 'circuit' ? this.behavioural[id] : this.circuit[id];
-      if (other && (other.isCircuit ? other.awake : true)) other.render(mix, n);
+    // the models that aren't selected finish any tail they were playing
+    if (!this.solo) for (const [id] of VOICES) for (const m of ['behavioural', 'circuit', 'cached']) {
+      if (m === this.model[id]) continue;
+      const other = this[m][id];
+      if (other && (m === 'behavioural' || (other.awake ?? true))) other.render(mix, n);
     }
     const g = this.master * VOLT_SCALE;
     for (let i = 0; i < n; i++) {
