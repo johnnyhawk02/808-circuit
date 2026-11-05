@@ -213,9 +213,23 @@ export class Voice {
     this.trimN = 1; this.trimA = 1; // output calibration, see dsp/calibration.js
   }
   set(id, v) { this.p[id] = v; this.onParam?.(id, v); }
+  // LEVEL knob gain, following the circuit's pot taper (dsp/calibration.js)
+  levelGain() { return levelLaw(this.levelPts, this.p.level); }
   // accent: 0 = normal hit, 1 = full accent (ACCENT knob fully up).
   // Peak-to-peak target in volts for this hit, from the manual's table.
   vpp(accent) {
     return lerp(this.vppNormal * this.trimN, this.vppAccent * this.trimA, clamp(accent, 0, 1));
   }
+}
+
+// LEVEL pot law through the circuit model's gains at 1/4 and 1/2 rotation
+// ([g25, g50], measured by test/calibrate.mjs): linear up to 1/4, then
+// exponential (log-linear) segments up to full. Without points: linear.
+export function levelLaw(pts, l) {
+  l = clamp(l, 0, 1);
+  if (!pts) return l;
+  const [g25, g50] = pts;
+  if (l <= 0.25) return g25 * l / 0.25;
+  if (l <= 0.5) return g25 * Math.pow(g50 / g25, (l - 0.25) / 0.25);
+  return g50 * Math.pow(1 / g50, (l - 0.5) / 0.5);
 }

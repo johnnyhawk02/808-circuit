@@ -1,46 +1,50 @@
-// CB — Cowbell (manual p.6, schematic p.13 "COWBELL", Q14/Q15, IC2)
+// CB — Cowbell, behavioural model (manual p.6, schematic p.13 "COWBELL").
 //
-// Circuit: two of the six Schmitt-trigger square oscillators (trimmed by
-// TM1/TM2 to 1.85 ms = 540 Hz and 1.25 ms = 800 Hz) each pass through their
-// own transistor gate (Q15, Q14), whose collectors are fed from the shared
-// envelope capacitor C9 (.47u) through D3/D4 and 470k. The two gated squares
-// are summed into the band-pass IC2 (R25 470k, R24 2.2k, C29/C30 ~2 kHz).
-// R82 + C34 (1u) in parallel with C9 makes a two-slope envelope: a fast
-// initial drop that emphasises the attack, then a longer tail.
-//
-// Manual check values: H 1.25 ms (800 Hz), L 1.85 ms (540 Hz);
-// 3.5 Vpp normal / 12 Vpp accent; decay 50 ms.
-import { Voice, Biquad, OnePole, decayCoef, rail } from '../dsp/core.js';
+// A cheap stand-in for voices/cb-circuit.js, fitted to its output
+// (test/fit.mjs). The 540 and 800 Hz Schmitt oscillators each switch a
+// transistor (Q15, Q14); while one is off the envelope current flows past it
+// into the IC2b band-pass, so each oscillator contributes the envelope gated
+// on and off by its square (a unipolar pulse train, not a +-1 square). The
+// envelope is C9 with R82/C34 as a second, slower load: a fast drop then a
+// long tail. After IC2b, C76/R117 high-pass the output into IC6.
+import { Voice, Biquad, OnePole, rail, decayCoef, lerp, clamp } from '../dsp/core.js';
+import { voicingTrigger } from './cb-circuit.js';
 
 export const meta = { id: 'cb', name: 'Cowbell', short: 'CB' };
+
+// Fitted to the circuit model (node test/fit.mjs cb ...).
+export const FIT = {
+  gLo: 0.8308, gHi: 1.216,           // 540 Hz (Q15) and 800 Hz (Q14) paths
+  bpF: 923.4, bpQ: 2.935,         // IC2b band-pass
+  fast: 0.008703, slow: 0.1298,    // envelope time constants, s
+  mixS: 0.1849,                 // share of the slow tail
+  inHp: 1365,                 // C30/C31 coupling into IC2b, Hz
+  g: 1.125,                     // volts out per volt of trigger
+};
 
 export class CB extends Voice {
   constructor(sr, metal) {
     super(sr, [{ id: 'level', name: 'Level', def: 0.8 }]);
     this.metal = metal;
     this.vppNormal = 3.5; this.vppAccent = 12;
-    // MFB band-pass IC2: f0 = sqrt((R1+R3)/(R1 R2 R3 C1 C2)) / 2pi
-    const R1 = 10e3, R2 = 470e3, R3 = 2.2e3, C1 = 2.2e-9, C2 = 3.3e-9;
-    const f0 = Math.sqrt((R1 + R3) / (R1 * R2 * R3 * C1 * C2)) / (2 * Math.PI);
-    this.bp = new Biquad(sr, 'bp', f0, 1.2);
-    this.lp = new OnePole(sr, 4500, 'lp');
-    this.eFast = 0; this.eSlow = 0;
-    this.kFast = decayCoef(0.012, sr); // C9 dumping into C34 via R82
-    this.kSlow = decayCoef(0.08, sr);  // combined C9 + C34 tail
+    const F = FIT;
+    this.bp = new Biquad(sr, 'bp', F.bpF, F.bpQ);
+    this.hp = new OnePole(sr, 1 / (2 * Math.PI * 22e3 * 0.022e-6), 'hp');
+    this.inHp = new OnePole(sr, F.inHp, 'hp');
+    this.kF = decayCoef(F.fast, sr); this.kS = decayCoef(F.slow, sr);
+    this.eF = 0; this.eS = 0;
   }
   trigger(accent = 0) {
-    const a = this.vpp(accent) / 2;
-    this.eFast = a * 0.9; this.eSlow = a * 0.1;
+    const F = FIT, v = voicingTrigger(accent) * lerp(this.trimN, this.trimA, clamp(accent, 0, 1)) * F.g;
+    this.eF = v * (1 - F.mixS); this.eS = v * F.mixS;
   }
   render(out, n) {
-    const lvl = this.p.level, lo = this.metal.cbLo, hi = this.metal.cbHi;
+    const F = FIT, lvl = this.levelGain(), lo = this.metal.cbLo, hi = this.metal.cbHi;
     for (let i = 0; i < n; i++) {
-      this.eFast *= this.kFast; this.eSlow *= this.kSlow;
-      const e = this.eFast + this.eSlow;
-      // gated squares (transistor gate passes the square scaled by the envelope)
-      const g = (lo[i] + hi[i]) * e;
-      const y = this.bp.tick(g) * 0.6 + this.lp.tick(g) * 0.22;
-      out[i] += rail(y) * lvl;
+      this.eF *= this.kF; this.eS *= this.kS;
+      const e = this.eF + this.eS;
+      const g = (1 - lo[i]) * 0.5 * F.gLo + (1 - hi[i]) * 0.5 * F.gHi; // on while the square is low (band-limited edges)
+      out[i] += rail(this.hp.tick(this.bp.tick(this.inHp.tick(g * e)))) * lvl;
     }
   }
 }

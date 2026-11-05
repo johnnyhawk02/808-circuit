@@ -5,12 +5,20 @@ that runs in an AudioWorklet (with a ScriptProcessor fallback) or in Node.
 
 ## Layout
 
-Every voice exists twice: a behavioural model (`voices/<id>.js`, light,
-calibrated to the manual) and a component-level circuit model
-(`voices/<id>-circuit.js`) that solves the schematic every sample.
+Every voice exists in four versions, and the bench switches between them per card:
+
+- **Circuit**: a component-level model (`voices/<id>-circuit.js`) that solves
+  the schematic every sample.
+- **Cached**: hits pre-rendered by the circuit model, played back at almost
+  no CPU (`dsp/cache.js`, see "Cached circuit hits" below).
+- **Synth**: a light model built from a few oscillators, filters and
+  envelopes (`voices/<id>.js`), fitted to the circuit model's output (see
+  "Synth models" below). Same knobs, about a tenth of the CPU.
+- **808**: recordings of a real TR-808 (`cache/808/`, see `cache/808/SOURCE.md`),
+  played at the nearest recorded knob setting (`dsp/sampler.js`).
 
 ```
-index.html            test bench: pads, knobs, Circuit/Behavioural switch per card,
+index.html            test bench: pads, knobs, Circuit / Cached / Synth / 808 switch per card,
                       16-step pattern, scope, DSP load readout
 app.js                UI + audio host
 worklet.js            AudioWorkletProcessor wrapping the kit; reports DSP load
@@ -34,12 +42,19 @@ voices/cpma-circuit.js CP / MA  IC21 band-pass, IC23 comparators + sawtooth, Q71
 voices/cb-circuit.js  CB    Q14/Q15, IC2b band-pass; voicing-board trigger buffer IC2a
 voices/cy-circuit.js  CY    Q19/Q20 envelopes, Q16/Q17/Q18 VCAs, IC5 high-passes, VR4, IC6
 voices/hats-circuit.js OH / CH  Q21-Q31, choke via R173/Q23, IC7
-dsp/core.js, dsp/metal.js, voices/*.js   the behavioural models
-dsp/calibration.js    output trims for the behavioural models
+dsp/core.js, dsp/metal.js, voices/*.js   the synth (behavioural) models
+dsp/calibration.js    generated: synth trims, LEVEL pot law, sample scaling
+dsp/sampler.js        808 sample voice; dsp/wav.js reads the WAVs
+cache/808/            Michael Fischer's TR-808 recordings (116 WAVs)
 test/measure.mjs      both models vs the manual's voice-check table; writes renders/
 test/circuit-check.mjs one circuit voice: Vpp, peaks, decay, CPU
 test/bd-compare.mjs   BD decay sweep, both models
 test/cpu.mjs          real-time cost of a busy pattern (circuit or behavioural)
+test/ref-render.mjs   caches circuit renders at every knob end (test/.cache/)
+test/match.mjs        synth vs circuit score per voice; test/vs808.mjs vs the recordings
+test/fit.mjs          fits a synth voice's FIT constants to the circuit
+test/calibrate.mjs    regenerates dsp/calibration.js from the cached renders
+test/analyze.mjs, env.mjs, wave.mjs   side-by-side detail for one knob case
 test/profile.mjs      circuit kit cost per voice and per stage (Newton passes, rebuilds)
 test/regress.mjs      circuit renders vs a saved reference (for solver changes)
 test/cache-render.mjs renders the cached circuit hits into cache/
@@ -66,24 +81,47 @@ Vpp / pitch / decay for the circuit model, the behavioural model and the
 manual side by side, and writes `renders/<id>-circuit.wav` and
 `renders/<id>-behavioural.wav` (normal hit, then accent hit).
 
-`node test/measure.mjs --calibrate` re-solves `dsp/calibration.js` after you
-change a voice's internals, so the normal and accent levels keep matching the
-table.
+The synth voices are calibrated to the circuit models rather than to the
+table (see below), so they land on the circuit's Vpp, not the manual's.
 
-Current result: every voice lands on its Vpp; pitches are within ~5% (the
-toms read slightly sharp because the diode pitch sag is included); decays are
-within ~20% except SD, which reads 82 ms against 60 ms because the snappy noise
-tail is counted.
+## Synth models
 
-## Where the manual didn't give a number (behavioural models)
+Each synth voice (`voices/<id>.js`) follows its circuit's signal flow with
+cheap blocks: state-variable resonators for the bridged-T networks, one-pole
+RC envelopes, swing VCAs, biquads computed from the part values where the
+circuit has a plain filter. The numbers the parts don't give directly live
+in an exported `FIT` object and were fitted to the circuit model:
 
-- The four non-cowbell metal oscillator frequencies are derived from their RC
-  parts (R40-R43, C1-C4) with one constant calibrated on the cowbell pair.
-- CP band-pass (IC21) values are partly off the scan: modelled at ~1 kHz.
-- The clap's accent figure in the table reads 2 Vpp, which looks like a typo;
-  accent is treated like the other voices (10 Vpp).
-- Envelope time constants that aren't readable from the schematic were set to
-  hit the table's decay times.
+```
+node test/ref-render.mjs all      cache circuit renders (default, accent, every knob at both ends)
+node test/fit.mjs bd f0 glide ... --write   Nelder-Mead on the listed FIT keys
+node test/calibrate.mjs           output trims, LEVEL pot law, sample scaling
+node test/match.mjs               score per voice
+```
+
+The score is in dB, lower is better, 0 is identical: level error + mean gap
+of the RMS envelope (2 ms hop) + mean gap of a 1/3-octave spectrogram (5 ms
+hop) + half the gap of a 1/12-octave spectrum, averaged over the knob cases.
+"Floor" is the circuit against itself with the noise source and metal
+oscillators in another state, i.e. the best a model of a noisy voice can do.
+Roughly: under 5 is very close, 5-10 is the same sound with small
+differences, over 15 is clearly different (not yet checked by ear).
+
+| voice | floor | before | synth now |
+|---|---|---|---|
+| BD | 0 | 11.7 | 5.4 |
+| SD | 2.5 | 18.2 | 5.9 |
+| LT / MT / HT | 1.9-2.8 | 19.9 / 20.6 / 22.2 | 5.7 / 9.2 / 10.4 |
+| LC / MC / HC | 0 | 8.8 / 13.4 / 11.2 | 3.3 / 4.2 / 4.8 |
+| RS / CL | 0 | 27.8 / 24.8 | 11.6 / 11.8 |
+| CP / MA | 4.6 / 3.5 | 16.9 / 30.6 | 10.5 / 13.2 |
+| CB | 1.2 | 26.6 | 7.1 |
+| CY | 3.7 | 22.9 | 14.8 |
+| OH / CH | 2.9 / 4.6 | 30.3 / 21.9 | 7.8 / 7.3 |
+
+Cost: the whole synth kit is 10-13% of one core in Node (the circuit kit
+170-190%). `node test/vs808.mjs` scores both models against the real 808
+recordings in `cache/808/`.
 
 Hosting: `.github/workflows/pages.yml` publishes the bench to GitHub Pages
 (https://johnnyhawk02.github.io/Tr808/) on every push to `main`. One-time
@@ -153,7 +191,7 @@ same numbers before the Nov 5 solver changes were 165% and 255%; a fast
 desktop may manage it). `node test/profile.mjs` breaks the cost down by voice
 and stage. The
 page shows the DSP load and suggests switching the heaviest voices (CY, MA, CP,
-SD, CB) to Behavioural. The behavioural kit uses about 14%. Circuit voices
+SD, CB) to Synth or 808. The synth kit uses about 10-13%. Circuit voices
 sleep 0.2 s after their output goes quiet.
 
 ### Changing the solver
@@ -179,7 +217,7 @@ spectrum columns against the `alt` spread, not the waveform error.
 
 ### Cached circuit hits
 
-Each voice's third mode, **Cached**, plays hits the circuit model rendered
+The **Cached** mode plays hits the circuit model rendered
 offline: 16 normal and 16 accented hits per voice at the default knob
 settings, each with the noise generator and metal oscillators in another
 state and the trigger level +-1.5%. Every trigger picks one at random (never

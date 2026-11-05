@@ -97,6 +97,8 @@ input[type=range] { accent-color: var(--fam, var(--fam-c)); width: 100%; margin:
 }
 .pad:hover { border-color: var(--fam); }
 .pad.acc { background: var(--fam); color: #1d1c1b; border-color: var(--fam); }
+.card.loading .model button[data-m=sample] { opacity: .5; }
+.card.nosample .model button[data-m=sample] { text-decoration: line-through; }
 .card.hit { animation: hit .35s ease-out; }
 .card.hit-acc { animation: hitacc .45s ease-out; }
 @keyframes hit { from { background: var(--panel-3); } to { background: var(--panel-2); } }
@@ -131,7 +133,7 @@ input[type=range] { accent-color: var(--fam, var(--fam-c)); width: 100%; margin:
     <div class="intro">
       <div>
         <h1>808 Voice Bench</h1>
-        <p class="lede">All sixteen TR-808 voices from the 1981 service notes, each in two versions. <b>Circuit</b> simulates every resistor, capacitor, diode, transistor and op-amp on the schematic, sample by sample. <b>Behavioural</b> is a lighter model calibrated to the manual's voice-check table.</p>
+        <p class="lede">All sixteen TR-808 voices from the 1981 service notes, each in four versions. <b>Circuit</b> simulates every resistor, capacitor, diode, transistor and op-amp on the schematic, sample by sample. <b>Cached</b> plays hits the circuit rendered in advance, at almost no CPU (level and decay work, pitch and tone don't). <b>Synth</b> rebuilds the same sound from a few oscillators, filters and envelopes fitted to the circuit model, at a fraction of the CPU. <b>808</b> plays recordings of a real TR-808 at the nearest knob setting.</p>
       </div>
       <div class="transport">
         <button type="button" class="btn primary" id="start">Start audio</button>
@@ -141,12 +143,13 @@ input[type=range] { accent-color: var(--fam, var(--fam-c)); width: 100%; margin:
       <div class="transport">
         <div class="model wide" role="group" aria-label="Model for all voices" id="all-models">
           <button type="button" data-m="circuit" aria-pressed="true">All circuit</button>
-          <button type="button" data-m="behavioural" aria-pressed="false">All behavioural</button>
           <button type="button" data-m="cached" aria-pressed="false">All cached</button>
+          <button type="button" data-m="behavioural" aria-pressed="false">All synth</button>
+          <button type="button" data-m="sample" aria-pressed="false">All 808</button>
         </div>
       </div>
       <p class="status"><span id="engine"></span> <span id="load"></span></p>
-      <p class="warn" id="overload" hidden>This computer can't run all the circuit models in real time, so you may hear dropouts. Switch some voices to Behavioural; CY, MA, CP, SD and CB cost the most.</p>
+      <p class="warn" id="overload" hidden>This computer can't run all the circuit models in real time, so you may hear dropouts. Switch some voices to Synth or 808; CY, MA, CP, SD and CB cost the most.</p>
     </div>
     <div class="scope-box">
       <canvas id="scope" aria-label="Oscilloscope of the master output"></canvas>
@@ -170,7 +173,8 @@ input[type=range] { accent-color: var(--fam, var(--fam-c)); width: 100%; margin:
   </section>
 
   <div class="notes">
-    <p>Each voice lives in its own files under <code>voices/</code>: <code>sd.js</code> is the behavioural snare, <code>sd-circuit.js</code> the circuit one, with the schematic references and part values in its header comment. The circuit solver (modified nodal analysis with Newton iteration) is <code>dsp/mna.js</code>.</p>
+    <p>Each voice lives in its own files under <code>voices/</code>: <code>sd.js</code> is the synth snare, <code>sd-circuit.js</code> the circuit one, with the schematic references and part values in its header comment. The circuit solver (modified nodal analysis with Newton iteration) is <code>dsp/mna.js</code>.</p>
+    <p>The 808 recordings are Michael Fischer's TR-808 sample set (1994, serial no. 103852): dry, from each voice's own output, LEVEL full, every other knob at 0, 2.5, 5, 7.5 and 10. The set has no accented hits, so Accent scales the recording by the circuit model's accent ratio. See <code>cache/808/SOURCE.md</code>.</p>
     <p>The circuit models are heavy: a busy pattern can need more than one CPU core. The DSP load readout shows how close you are.</p>
     <p>Closed hi-hat chokes the open hi-hat, as Q23 does on the voicing board. CB, CY, OH and CH share the same free-running oscillators, so no two metal hits start in the same phase.</p>
   </div>
