@@ -42,6 +42,18 @@ h2 { font-size: 1.15rem; color: var(--ink-dim); }
 button, input { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
+/* sticky bar: title + transport, always reachable */
+.bar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between;
+  margin: -20px calc(-1 * max(16px, env(safe-area-inset-left, 0px))) 0;
+  padding: 12px max(16px, env(safe-area-inset-left, 0px));
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.bar-ctl { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; }
+.bar #play { min-width: 92px; }
+.lede { margin-top: 0; }
+
 /* top strip */
 .top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 22px; align-items: stretch; }
 .intro { display: grid; gap: 14px; align-content: start; min-width: 0; }
@@ -124,19 +136,30 @@ input[type=range] { accent-color: var(--fam, var(--fam-c)); width: 100%; margin:
 @media (max-width: 760px) {
   .top { grid-template-columns: minmax(0, 1fr); }
   h1 { font-size: 1.6rem; }
+  .bar { padding-block: 8px; gap: 8px; }
+  .bar h1 { font-size: 1.3rem; }
+  .bar-ctl { gap: 8px 12px; flex-wrap: nowrap; }
+  .bar .ctl input[type=range] { width: 90px; }
+  .bar #start { display: none; } /* Play starts audio too */
 }
 @media (prefers-reduced-motion: reduce) { .card.hit, .card.hit-acc { animation: none; } }
 </style>
 
 <div class="wrap">
+  <div class="bar">
+    <h1>808 Voice Bench</h1>
+    <div class="bar-ctl">
+      <button type="button" class="btn primary" id="play" aria-pressed="false">Play</button>
+      <label class="ctl" for="tempo">Tempo <output id="tempo-out">118</output><input type="range" id="tempo" min="60" max="200" step="1" value="118"></label>
+      <button type="button" class="btn" id="start">Start audio</button>
+    </div>
+  </div>
   <div class="top">
     <div class="intro">
       <div>
-        <h1>808 Voice Bench</h1>
         <p class="lede">All sixteen TR-808 voices from the 1981 service notes, each in four versions. <b>Circuit</b> simulates every resistor, capacitor, diode, transistor and op-amp on the schematic, sample by sample. <b>Cached</b> plays hits the circuit rendered in advance, at almost no CPU (level and decay work, pitch and tone don't). <b>Synth</b> rebuilds the same sound from a few oscillators, filters and envelopes fitted to the circuit model, at a fraction of the CPU. <b>808</b> plays recordings of a real TR-808 at the nearest knob setting.</p>
       </div>
       <div class="transport">
-        <button type="button" class="btn primary" id="start">Start audio</button>
         <label class="ctl" for="master">Master<input type="range" id="master" min="0" max="1.5" step="0.01" value="0.8"></label>
         <label class="ctl" for="accent">Accent level<input type="range" id="accent" min="0" max="1" step="0.01" value="1"></label>
       </div>
@@ -163,8 +186,6 @@ input[type=range] { accent-color: var(--fam, var(--fam-c)); width: 100%; margin:
     <div class="seq-head">
       <h2 id="seq-title">Pattern</h2>
       <div class="seq-ctl">
-        <button type="button" class="btn" id="play" aria-pressed="false">Play</button>
-        <label class="ctl" for="tempo">Tempo <output id="tempo-out">118</output><input type="range" id="tempo" min="60" max="200" step="1" value="118"></label>
         <button type="button" class="btn" id="clear">Clear</button>
       </div>
     </div>
