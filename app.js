@@ -109,7 +109,7 @@ for (const [i, v] of spec.entries()) {
     <p class="ref"><span>${circuit}</span><span>${check}</span></p>
     <div class="model" role="group" aria-label="${v.name} model">
       <button type="button" data-m="circuit" aria-pressed="${state.models[v.id] === 'circuit'}" title="Component-level simulation of every part on the schematic">Circuit</button>
-      <button type="button" data-m="cached" aria-pressed="${state.models[v.id] === 'cached'}" title="16 normal + 16 accented hits rendered by the circuit at the default knobs, one picked at random per hit. Level and Decay work; pitch and tone knobs don't. Almost no CPU.">Cached</button>
+      <button type="button" data-m="cached" aria-pressed="${state.models[v.id] === 'cached'}" title="16 normal + 16 accented hits rendered by the circuit at the default knobs, one picked at random per hit. Level, Decay and the clap's Snap work; pitch and tone knobs don't. Almost no CPU.">Cached</button>
       <button type="button" data-m="behavioural" aria-pressed="${state.models[v.id] === 'behavioural'}" title="Synthesized: oscillators, filters and envelopes fitted to the circuit model, at a fraction of the CPU">Synth</button>
       <button type="button" data-m="sample" aria-pressed="${state.models[v.id] === 'sample'}" title="Recordings of a real TR-808 (Michael Fischer, 1994), nearest knob setting">808</button>
     </div>

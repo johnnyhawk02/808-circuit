@@ -6,10 +6,12 @@
 import { cases, render, VOICES } from './match-lib.mjs';
 import { loadRef } from './match.mjs';
 import { features, distance } from './features.mjs';
+import { SAMPLE_KNOBS } from '../dsp/sampler.js';
 const ids = process.argv.slice(2).length ? process.argv.slice(2) : VOICES.map(([v]) => v);
 const rows = [];
 for (const id of ids) {
-  const cs = cases(id).filter((c) => !c.levelOnly && c.accent === 0);
+  // knobs the sample set doesn't cover (e.g. the clap's SNAP) are left out
+  const cs = cases(id).filter((c) => !c.levelOnly && c.accent === 0 && Object.keys(c.knobs).every((k) => SAMPLE_KNOBS[id].includes(k)));
   let sc = 0, sb = 0, n = 0;
   for (const c of cs) {
     const ref = loadRef(id, c); if (!ref) continue;

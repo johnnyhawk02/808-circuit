@@ -43,7 +43,7 @@ export function render(id, model, cs, opts = {}) {
   }
   const v = kit.voices[id];
   const defs = Object.fromEntries(v.params.map((p) => [p.id, p.def]));
-  for (const k in defs) kit.set(id, k, k === 'level' ? 1 : 0.5);
+  for (const k in defs) kit.set(id, k, k === 'level' ? 1 : defs[k]); // knobs at their defaults (12 o'clock but for CP's SNAP)
   for (const [k, val] of Object.entries(cs.knobs)) kit.set(id, k, val);
   const n = Math.round(cs.secs * SR), out = new Float32Array(n);
   kit.trigger(id, cs.accent);

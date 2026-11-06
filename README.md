@@ -179,8 +179,12 @@ early. R200 10k from Q70's emitter to -15 V is added (the schematic's
 recording and listed in `CP_PARTS` (voices/cpma-circuit.js), several outside
 normal tolerances. Distance to the recording (`node test/vs808.mjs cp`):
 circuit 25.4 -> 7.2, synth 16.7 -> 10.9; the floor (the circuit against
-itself with other noise) is ~4.7. Accented hits still run the claps together
-more than normal ones (the sample set has no accented clap to fit against).
+itself with other noise) is ~4.7. On the circuit an accented hit drives the
+Q71/Q72 pair flat out and the claps run together; with no accented clap in
+the sample set to check that against, an accented clap is now the normal hit
+2.4x louder. SNAP (not on the 808, default 0) turns the Q70 reverb path down
+through R376 for a drier clap; the cached hits carry a dry twin of every hit
+so SNAP works there too.
 `node test/cp-score.mjs` prints the envelope and spectrum next to the
 recording; `node test/cp-fit.mjs <parts>` refits; `node test/cp-probe.mjs`
 shows the comparators, sawtooth and OTA current through one hit.

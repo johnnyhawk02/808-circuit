@@ -42,7 +42,7 @@ function writeIndex(ids) {
   }
   const sorted = Object.fromEntries(VOICES.map(([id]) => id).filter((id) => index[id]).map((id) => [id, index[id]]));
   writeFileSync(f, JSON.stringify(sorted));
-  let bytes = 0; for (const id in sorted) bytes += 44 + 2 * sorted[id].normal.concat(sorted[id].accent).reduce((a, r) => a + r[1], 0);
+  let bytes = 0; for (const id in sorted) bytes += 44 + 2 * sorted[id].normal.concat(sorted[id].accent, sorted[id].dryNormal ?? [], sorted[id].dryAccent ?? []).reduce((a, r) => a + r[1], 0);
   console.log(`index: ${Object.keys(sorted).length} voices, ${(bytes / 1e6).toFixed(1)} MB of WAV`);
 }
 
@@ -68,7 +68,12 @@ function renderVoice(id) {
     kit.shared.noise.s = (rnd() * 4294967295 >>> 0) || 1;
     for (const o of kit.shared.metal.osc) o.vc = 2.2 + 0.6 * rnd();
     jitter = 1 + 0.03 * (rnd() - 0.5);
+    return { noise: kit.shared.noise.s, vc: kit.shared.metal.osc.map((o) => o.vc), jitter };
   };
+  const again = (st) => { kit.shared.noise.s = st.noise; kit.shared.metal.osc.forEach((o, i) => { o.vc = st.vc[i]; }); jitter = st.jitter; };
+  // a SNAP knob (clap) turns one linear path into the mixer down: store each
+  // hit a second time with SNAP full, same noise, and let the player mix them
+  const hasSnap = v.params.some((p) => p.id === 'snap');
   const hit = (accent) => {
     const n = Math.round((MAXLEN[id] ?? 1.2) * SR), out = new Float32Array(n);
     kit.trigger(id, accent, kit.frame);
@@ -99,9 +104,15 @@ function renderVoice(id) {
     return y;
   };
   rest();
-  const hits = { normal: [], accent: [] };
+  const hits = { normal: [], accent: [], dryNormal: [], dryAccent: [] };
   for (const key of ['normal', 'accent']) for (let k = 0; k < VARIANTS; k++) {
-    variant(); hits[key].push(trim(resample(hit(key === 'accent' ? 1 : 0)))); rest();
+    const st = variant(), acc = key === 'accent' ? 1 : 0, full = trim(resample(hit(acc))); rest();
+    hits[key].push(full);
+    if (hasSnap) {
+      kit.set(id, 'snap', 1); rest(); again(st);
+      const dry = resample(hit(acc)).slice(0, full.length); rest(); kit.set(id, 'snap', 0); rest();
+      hits[key === 'accent' ? 'dryAccent' : 'dryNormal'].push(dry);
+    }
   }
   // LEVEL knob: gain of the same hit at level 0, 1/8 .. 1 (RMS ratio)
   const rms = (x) => Math.sqrt(x.reduce((a, y) => a + y * y, 0) / x.length);
@@ -116,12 +127,13 @@ function renderVoice(id) {
   }
   // pack: 16-bit, one scale per voice
   let peak = 0; for (const x of [...hits.normal, ...hits.accent]) for (const y of x) peak = Math.max(peak, Math.abs(y));
-  const scale = peak * 1.001, all = [...hits.normal, ...hits.accent];
+  const scale = peak * 1.001, all = [...hits.normal, ...hits.accent, ...hits.dryNormal, ...hits.dryAccent];
   const total = all.reduce((a, x) => a + x.length, 0), pcm = new Int16Array(total), ranges = [];
   let o = 0;
   for (const x of all) { ranges.push([o, x.length]); for (let i = 0; i < x.length; i++) pcm[o + i] = Math.round(x[i] / scale * 32767); o += x.length; }
   writeFileSync(new URL(`${id}.wav`, dir), writeWav(pcm, OUT_SR));
-  const info = { sr: OUT_SR, scale: +scale.toFixed(6), normal: ranges.slice(0, VARIANTS), accent: ranges.slice(VARIANTS), level };
+  const info = { sr: OUT_SR, scale: +scale.toFixed(6), normal: ranges.slice(0, VARIANTS), accent: ranges.slice(VARIANTS, 2 * VARIANTS), level };
+  if (hasSnap) { info.dryNormal = ranges.slice(2 * VARIANTS, 3 * VARIANTS); info.dryAccent = ranges.slice(3 * VARIANTS); }
   writeFileSync(new URL(`${id}.json`, dir), JSON.stringify(info));
   console.log(id, `${(total / OUT_SR).toFixed(1)} s audio, ${(total * 2 / 1e6).toFixed(2)} MB, ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 }

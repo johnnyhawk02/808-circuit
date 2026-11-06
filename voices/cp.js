@@ -17,19 +17,19 @@ export const meta = { id: 'cp', name: 'Hand Clap', short: 'CP' };
 
 // Fitted to the circuit model (node test/fit.mjs cp ...).
 export const FIT = {
-  bpF: 1256, bpQ: 1.61,           // IC21 band-pass
-  drive: 1.999,                    // OTA input clipping
-  tooth: 0.01095, win: 0.02496,      // tooth period and comparator window, s
-  tTau: 0.01186, lTau: 0.0393,       // C144 decay inside the window / last ramp
-  expK: 1.199,                       // Q71/Q72 exponential converter steepness
-  clap: 2.386,                       // clap level, V
-  vA: 0.1536, vAtt: 0.03809, vDec: 0.3815, vLp: 1021, // reverb level, attack, decay, C146 roll-off
-  thump: 0.1397,                    // sawtooth leak
+  bpF: 1253, bpQ: 1.931,           // IC21 band-pass
+  drive: 1.228,                    // OTA input clipping
+  tooth: 0.01095, win: 0.02643,      // tooth period and comparator window, s
+  tTau: 0.03136, lTau: 0.01929,       // C144 decay inside the window / last ramp
+  expK: 1.201,                       // Q71/Q72 exponential converter steepness
+  clap: 3.071,                       // clap level, V
+  vA: 0.1982, vAtt: 0.03476, vDec: 0.2629, vLp: 1739, // reverb level, attack, decay, C146 roll-off
+  thump: 0.06321,                    // sawtooth leak
 };
 
 export class CP extends Voice {
   constructor(sr) {
-    super(sr, [{ id: 'level', name: 'Level', def: 0.8 }]);
+    super(sr, [{ id: 'level', name: 'Level', def: 0.8 }, { id: 'snap', name: 'Snap', def: 0 }]);
     this.vppNormal = 6; this.vppAccent = 10;
     const F = FIT;
     this.noise = new Noise(1981);
@@ -59,8 +59,9 @@ export class CP extends Voice {
       const nz = this.bp.tick(this.noise.white());
       if (g < 1e-5 && this.vS < 1e-5) { this.thHp.tick(0); continue; }
       const clap = Math.tanh(nz * F.drive) * g * a * F.clap;
-      const verb = this.vLp.tick(nz * this.vS * F.vA);
-      out[i] += rail(clap + verb + this.thHp.tick(this.saw * a * F.thump)) * lvl;
+      const wet = 1 - clamp(this.p.snap ?? 0, 0, 1); // SNAP turns the Q70 path (verb and its thump) down
+      const verb = this.vLp.tick(nz * this.vS * F.vA) * wet;
+      out[i] += rail(clap + verb + this.thHp.tick(this.saw * a * F.thump) * wet) * lvl;
     }
   }
 }

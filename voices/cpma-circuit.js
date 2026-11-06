@@ -70,7 +70,8 @@ function mixer(v, m, level) {
 
 export class CPCircuit extends CircuitVoice {
   constructor(sr, shared) {
-    super(sr, [{ id: 'level', name: 'Level', def: 0.8 }], shared);
+    super(sr, [{ id: 'level', name: 'Level', def: 0.8 }, { id: 'snap', name: 'Snap', def: 0 }], shared);
+    this.accGain = 1;
     // C.P. OFFSET trimmer TM3 (see CP_PARTS)
     this.tm3 = CP_PARTS.TM3;
     const wn = this.shared.noise;
@@ -128,7 +129,7 @@ export class CPCircuit extends CircuitVoice {
     m.NPN('B70', 'C70', 'E70'); m.R('E70', 'gnd', 330);          // Q70, R369
     if (CP_PARTS.R200) m.Rsrc('E70', CP_PARTS.R200, -15);         // R200 (p.9 "PORTION CHANGED")
     m.Rsrc('C70', 10e3, 15); m.C('C70', 'gnd', 0.018e-6);        // R363, C146
-    m.C('C70', 'N152', 0.0047e-6); m.R('N152', 'S', 47e3);       // C152, R376
+    m.C('C70', 'N152', 0.0047e-6); this.r376 = m.R('N152', 'S', 47e3); // C152, R376
     mixer(this, m);
     m.tol = 1e-4; f.tol = 1e-4;
     const I = (st, n) => st.idx[n];
@@ -144,10 +145,19 @@ export class CPCircuit extends CircuitVoice {
     this.ota.i = iabc * Math.tanh(-this.s4.v[x.I2] / (2 * VT));
   }
   onParam() {
+    // SNAP (not on the 808): turns the Q70 "reverb" path down through R376,
+    // 0 = as built, 1 = the claps alone
+    if (this.r376) { this.r376.g = Math.max(1e-12, 1 - this.p.snap) / 47e3; this.mix.touch(); }
     if (this.tm) { this.tm.v = -15 * this.tm3; }
     if (this.vr17) { this.vr17.g = 1 / Math.max(1, 100e3 * aTaper(this.p.level)); this.mix.touch(); }
   }
-  output() { return this.mix.v[this.iOut]; }
+  // ACCENT. On the circuit, the accented trigger also charges C143 higher,
+  // which lifts Q71's base through R362 and drives the Q71/Q72 pair flat out:
+  // the claps run together into one burst. The sample set has no accented
+  // clap to check that against, so here an accented hit is the normal hit,
+  // louder by what the circuit's accent would give (x2.4 at full accent).
+  trigger(accent = 0) { this.accGain = 1 + 1.4 * Math.min(1, Math.max(0, accent)); this.fire(this.switches[0], 0); }
+  output() { return this.mix.v[this.iOut] * this.accGain; }
 }
 
 export class MACircuit extends CircuitVoice {

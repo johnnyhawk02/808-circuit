@@ -12,7 +12,8 @@
 //
 // Files: cache/<id>.wav (16-bit mono, the hits back to back, normal ones
 // first) and cache/index.json ({ <id>: { sr, scale, normal: [[start, len]..],
-// accent: [..], level: [gain at level 0, 1/8 .. 1] } }).
+// accent: [..], level: [gain at level 0, 1/8 .. 1], and for a voice with a
+// SNAP knob dryNormal / dryAccent: the same hits with SNAP full } }).
 import { Voice, clamp } from './core.js';
 
 export const VARIANTS = 16;
@@ -55,6 +56,8 @@ export class CachedVoice extends Voice {
     const s = info.scale / 32767;
     const cut = (r) => { const x = new Float32Array(r[1]); for (let i = 0; i < r[1]; i++) x[i] = int16[r[0] + i] * s; return x; };
     this.data = { normal: info.normal.map(cut), accent: info.accent.map(cut) };
+    // SNAP (clap): the same hits with the reverb path off, mixed in by the knob
+    if (info.dryNormal) { this.data.dryNormal = info.dryNormal.map(cut); this.data.dryAccent = info.dryAccent.map(cut); }
     this.rate = info.sr / this.sr;  // playback step when the host runs at another rate
   }
   _rand() { let x = this.rng; x ^= x << 13; x ^= x >>> 17; x ^= x << 5; this.rng = x >>> 0; return this.rng / 4294967296; }
@@ -65,7 +68,10 @@ export class CachedVoice extends Voice {
     if (k === this.last && n > 1) k = (k + 1 + Math.floor(this._rand() * (n - 1))) % n;
     this.last = k;
     // in-between accent settings mix the normal and accented hit
-    this.plays.push({ a: this.data.normal[k], b: this.data.accent[k], mix: clamp(accent, 0, 1), pos: 0 });
+    const d = this.data, snap = d.dryNormal ? clamp(this.p.snap ?? 0, 0, 1) : 0;
+    // SNAP: each hit is blended with its dry twin (the mixer is linear, so
+    // this is the circuit with its reverb path turned down)
+    this.plays.push({ a: d.normal[k], b: d.accent[k], da: snap ? d.dryNormal[k] : null, db: snap ? d.dryAccent[k] : null, snap, mix: clamp(accent, 0, 1), pos: 0 });
     if (this.plays.length > 8) this.plays.shift();
   }
   get awake() { return this.plays.length > 0; }
@@ -88,12 +94,15 @@ export class CachedVoice extends Voice {
     for (const pl of this.plays) {
       // a pure normal or accent hit plays alone (its own length)
       const m = pl.mix, a = m === 1 ? pl.b : pl.a, b = m === 0 || m === 1 ? a : pl.b;
-      const len = (pl.len ??= Math.min(a.length, b.length)), k = this._fade(len);
+      const da = m === 1 ? pl.db : pl.da, db = m === 0 || m === 1 ? da : pl.db, sn = pl.snap;
+      const len = (pl.len ??= Math.min(a.length, b.length, da ? da.length : Infinity, db ? db.length : Infinity)), k = this._fade(len);
       let pos = pl.pos;
       for (let i = 0; i < n && pos < len - 1; i++, pos += step) {
         const j = pos | 0, f = pos - j;
-        const xa = a[j] + (a[j + 1] - a[j]) * f;
-        let y = b === a ? xa : xa + (b[j] + (b[j + 1] - b[j]) * f - xa) * m;
+        let xa = a[j] + (a[j + 1] - a[j]) * f;
+        if (sn) xa += (da[j] + (da[j + 1] - da[j]) * f - xa) * sn;
+        let y = xa;
+        if (b !== a) { let xb = b[j] + (b[j + 1] - b[j]) * f; if (sn) xb += (db[j] + (db[j + 1] - db[j]) * f - xb) * sn; y = xa + (xb - xa) * m; }
         if (k) y *= Math.exp(-k * pos * isr);
         if (pl.cut !== undefined) { const c = 1 - (pos - pl.cut) * isr * 100; if (c <= 0) { pos = len; break; } y *= c; }
         out[i] += y * g;
