@@ -31,13 +31,30 @@
 //  High-pass C131 .01u / R338 15k, then the C132/C133 .001u, R339 3.3k,
 //  R340 68k Sallen-Key around Q68 (R347 22k to -15 V), C151 .01u, R377 100k.
 //
-// Readings / assumptions: C140 is printed .0027u, but the manual's text
-// describes a window of about 30 ms, which needs .027u (used here). TM3
-// (C.P. OFFSET) is taken as a 10k pot from gnd to -15 V, set by the manual's
-// check (6 Vpp clap). The BA662's bias pin sits two diodes above -15 V.
+// Readings / assumptions. The schematic is read part by part, but five values
+// are set against the real TR-808 recording (cache/808/CP, test/cp-fit.mjs),
+// in CP_PARTS below:
+//  * R200 10k, Q70 emitter to -15 V: from the schematic's "PORTION CHANGED"
+//    note (p.9), not a fit. It biases the reverb transistor on.
+//  * C144 .39u (printed .47/50): an electrolytic, -17% is within its usual
+//    20% tolerance. Sets the clap spacing: 11.5 ms, as on the recording.
+//  * C140 .022u (printed .0027u): the manual's text gives a ~30 ms window,
+//    which needs ~.02u; .022u lands the fourth clap where the recording has it.
+//  * TM3 (C.P. OFFSET) 0.71: a trimmer, taken as a 10k pot from gnd to -15 V.
+//    Higher than the manual's p.14 setting (0.61, 6 Vpp bursts): there the
+//    Q71/Q72 pair sits flat out at each dump, so every clap holds for ~4 ms
+//    and the gaps stay shallow, where the recording's claps die away at once.
+//  * C127 180p (printed .0018u): with .0018u the IC21 band-pass has a high
+//    shelf only ~14 dB down and the clap comes out much brighter than the
+//    recording; fitted alone, C127 lands on 181 pF, i.e. the printed digits
+//    one decimal place on (.00018u).
+// The BA662's bias pin sits two diodes above -15 V.
 import { CircuitVoice, aTaper } from './circuit-voice.js';
 
 const VT = 0.02585;
+
+// Part values that are not plain readings of the schematic (see notes above).
+export const CP_PARTS = { C144: 0.39e-6, C140: 0.022e-6, R200: 10e3, TM3: 0.71, C127: 180e-12 };
 
 function mixer(v, m, level) {
   m.OpAmp('gnd', 'S', 'OUT');
@@ -49,15 +66,13 @@ function mixer(v, m, level) {
 export class CPCircuit extends CircuitVoice {
   constructor(sr, shared) {
     super(sr, [{ id: 'level', name: 'Level', def: 0.8 }], shared);
-    // C.P. OFFSET trimmer TM3, set by the manual's adjustment (p.14: clap at
-    // TP-5, LEVEL full, about 6 Vpp bursts with the level dropping to about
-    // 0.5 Vpp between them). 0.61 gives 6 Vpp with ~0.6 Vpp between bursts.
-    this.tm3 = 0.61;
+    // C.P. OFFSET trimmer TM3 (see CP_PARTS)
+    this.tm3 = CP_PARTS.TM3;
     const wn = this.shared.noise;
     // ---- S1: noise band-pass IC21
     const f = (this.s1 = this.stage(['WNc', 'L', 'Nm', 'B']));
     this.feed(f, 'WNc', 1, (i) => wn.wn[i]);
-    f.R('WNc', 'L', 27e3); f.C('WNc', 'L', 0.0018e-6); f.R('L', 'gnd', 10e3); // R332, C127, R333
+    f.R('WNc', 'L', 27e3); f.C('WNc', 'L', CP_PARTS.C127); f.R('L', 'gnd', 10e3); // R332, C127, R333
     f.C('L', 'Nm', 0.0047e-6); f.C('L', 'B', 0.0047e-6); f.R('Nm', 'B', 100e3); // C128, C129, R334
     f.OpAmp('gnd', 'Nm', 'B');
     // ---- S2: CP line and envelopes
@@ -72,10 +87,10 @@ export class CPCircuit extends CircuitVoice {
     // ---- S3: comparators, sawtooth and the exponential pair
     const c = (this.s3 = this.stage(['OC', 'OB', 'Dm', 'OA', 'SAW', 'Dp', 'OD', 'N141', 'B73', 'C73', 'M15']));
     this.rail(c, 'M15', -15);
-    c.R('OC', 'gnd', 1e6); c.C('OC', 'gnd', 0.027e-6);           // R350, C140
+    c.R('OC', 'gnd', 1e6); c.C('OC', 'gnd', CP_PARTS.C140);           // R350, C140
     c.R('OB', 'Dm', 2.7e3); c.R('Dm', 'gnd', 5.6e3);             // R355, R354
     c.R('OA', 'gnd', 82e3); c.D('OA', 'SAW');                    // R365, D71
-    c.C('SAW', 'gnd', 0.47e-6);                                  // C144
+    c.C('SAW', 'gnd', CP_PARTS.C144);                                  // C144
     c.R('SAW', 'Dp', 1e6); c.C('OD', 'Dp', 220e-12);             // R356, C142
     c.R('OD', 'gnd', 10e3); c.R('OD', 'B73', 68e3);              // R359, R358
     c.C('OB', 'N141', 0.001e-6); c.D('M15', 'N141'); c.R('N141', 'B73', 68e3); // C141, D70, R357
@@ -106,6 +121,7 @@ export class CPCircuit extends CircuitVoice {
     this.link(m, 'B70', 1e6, e, 'N138');                         // R349
     this.feed(e, 'N138', 1e6, () => m.v[m.idx.B70]);
     m.NPN('B70', 'C70', 'E70'); m.R('E70', 'gnd', 330);          // Q70, R369
+    if (CP_PARTS.R200) m.Rsrc('E70', CP_PARTS.R200, -15);         // R200 (p.9 "PORTION CHANGED")
     m.Rsrc('C70', 10e3, 15); m.C('C70', 'gnd', 0.018e-6);        // R363, C146
     m.C('C70', 'N152', 0.0047e-6); m.R('N152', 'S', 47e3);       // C152, R376
     mixer(this, m);
