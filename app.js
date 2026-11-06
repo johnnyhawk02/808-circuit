@@ -43,7 +43,9 @@ const send = (m, transfer) => {
 };
 
 const state = { values: {}, models: {}, master: 0.8, accent: 1, engine: '' };
-for (const v of spec) { state.values[v.id] = { ...v.values }; state.models[v.id] = 'circuit'; }
+// Default model per voice: Cached everywhere (almost no CPU), Circuit for the clap.
+const DEFAULT_MODEL = (id) => (id === 'cp' ? 'circuit' : 'cached');
+for (const v of spec) { state.values[v.id] = { ...v.values }; state.models[v.id] = DEFAULT_MODEL(v.id); }
 
 async function startAudio() {
   if (ctx) { if (ctx.state !== 'running') await ctx.resume(); return; }
@@ -106,10 +108,10 @@ for (const [i, v] of spec.entries()) {
     </header>
     <p class="ref"><span>${circuit}</span><span>${check}</span></p>
     <div class="model" role="group" aria-label="${v.name} model">
-      <button type="button" data-m="circuit" aria-pressed="true" title="Component-level simulation of every part on the schematic">Circuit</button>
-      <button type="button" data-m="cached" aria-pressed="false" title="16 normal + 16 accented hits rendered by the circuit at the default knobs, one picked at random per hit. Level and Decay work; pitch and tone knobs don't. Almost no CPU.">Cached</button>
-      <button type="button" data-m="behavioural" aria-pressed="false" title="Synthesized: oscillators, filters and envelopes fitted to the circuit model, at a fraction of the CPU">Synth</button>
-      <button type="button" data-m="sample" aria-pressed="false" title="Recordings of a real TR-808 (Michael Fischer, 1994), nearest knob setting">808</button>
+      <button type="button" data-m="circuit" aria-pressed="${state.models[v.id] === 'circuit'}" title="Component-level simulation of every part on the schematic">Circuit</button>
+      <button type="button" data-m="cached" aria-pressed="${state.models[v.id] === 'cached'}" title="16 normal + 16 accented hits rendered by the circuit at the default knobs, one picked at random per hit. Level and Decay work; pitch and tone knobs don't. Almost no CPU.">Cached</button>
+      <button type="button" data-m="behavioural" aria-pressed="${state.models[v.id] === 'behavioural'}" title="Synthesized: oscillators, filters and envelopes fitted to the circuit model, at a fraction of the CPU">Synth</button>
+      <button type="button" data-m="sample" aria-pressed="${state.models[v.id] === 'sample'}" title="Recordings of a real TR-808 (Michael Fischer, 1994), nearest knob setting">808</button>
     </div>
     <div class="knobs"></div>
     <div class="pads">
