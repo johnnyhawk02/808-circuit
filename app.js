@@ -43,8 +43,8 @@ const send = (m, transfer) => {
 };
 
 const state = { values: {}, models: {}, master: 0.8, accent: 1, engine: '' };
-// Default model per voice: Cached everywhere (almost no CPU), Circuit for the clap.
-const DEFAULT_MODEL = (id) => (id === 'cp' ? 'circuit' : 'cached');
+// Default model per voice: Cached everywhere (almost no CPU).
+const DEFAULT_MODEL = () => 'cached';
 for (const v of spec) { state.values[v.id] = { ...v.values }; state.models[v.id] = DEFAULT_MODEL(v.id); }
 
 async function startAudio() {

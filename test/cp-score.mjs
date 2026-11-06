@@ -28,7 +28,9 @@ export function spectrum(x, a, b) { const s = x.subarray(Math.round(a * SR), Mat
 const gap = (a, b) => a.reduce((s, v, i) => s + Math.abs(Math.max(v, -60) - Math.max(b[i], -60)), 0) / a.length;
 export function score(x, R) {
   const eA = envelope(x), eB = envelope(R);
-  return { envE: gap(eA.slice(0, 60), eB.slice(0, 60)), envT: gap(eA.slice(60), eB.slice(60)), spB: gap(spectrum(x, 0, 0.035), spectrum(R, 0, 0.035)), spT: gap(spectrum(x, 0.06, 0.3), spectrum(R, 0.06, 0.3)) };
+  // gaps between the claps: 2 ms frames in the first 30 ms, where the ear
+  // hears whether the claps come apart
+  return { art: gap(eA.slice(0, 15), eB.slice(0, 15)), envE: gap(eA.slice(0, 60), eB.slice(0, 60)), envT: gap(eA.slice(60), eB.slice(60)), spB: gap(spectrum(x, 0, 0.035), spectrum(R, 0, 0.035)), spT: gap(spectrum(x, 0.06, 0.3), spectrum(R, 0.06, 0.3)) };
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
   const R = realClap(), seeds = [0x808, 0x1234567, 0xbeef];

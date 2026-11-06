@@ -31,30 +31,35 @@
 //  High-pass C131 .01u / R338 15k, then the C132/C133 .001u, R339 3.3k,
 //  R340 68k Sallen-Key around Q68 (R347 22k to -15 V), C151 .01u, R377 100k.
 //
-// Readings / assumptions. The schematic is read part by part, but five values
-// are set against the real TR-808 recording (cache/808/CP, test/cp-fit.mjs),
-// in CP_PARTS below:
+// Readings / assumptions. The schematic is read part by part, but the values
+// in CP_PARTS below are set against the real TR-808 recording (cache/808/CP;
+// test/cp-fit.mjs, score = test/vs808.mjs's distance plus the depth of the
+// gaps between the claps), in five rounds on 2026-11-06:
 //  * R200 10k, Q70 emitter to -15 V: from the schematic's "PORTION CHANGED"
 //    note (p.9), not a fit. It biases the reverb transistor on.
-//  * C144 .39u (printed .47/50): an electrolytic, -17% is within its usual
-//    20% tolerance. Sets the clap spacing: 11.5 ms, as on the recording.
-//  * C140 .022u (printed .0027u): the manual's text gives a ~30 ms window,
-//    which needs ~.02u; .022u lands the fourth clap where the recording has it.
-//  * TM3 (C.P. OFFSET) 0.71: a trimmer, taken as a 10k pot from gnd to -15 V.
-//    Higher than the manual's p.14 setting (0.61, 6 Vpp bursts): there the
-//    Q71/Q72 pair sits flat out at each dump, so every clap holds for ~4 ms
-//    and the gaps stay shallow, where the recording's claps die away at once.
-//  * C127 180p (printed .0018u): with .0018u the IC21 band-pass has a high
-//    shelf only ~14 dB down and the clap comes out much brighter than the
-//    recording; fitted alone, C127 lands on 181 pF, i.e. the printed digits
-//    one decimal place on (.00018u).
+//  * C144 .37u (printed .47/50, an electrolytic): the clap spacing, 11.5 ms
+//    as on the recording.
+//  * C140 .021u (printed .0027u; the manual's text gives a ~30 ms window,
+//    which needs ~.02u): where the fourth clap lands.
+//  * TM3 (C.P. OFFSET) 0.706, a trimmer taken as a 10k pot from gnd to
+//    -15 V. Above the manual's p.14 setting (0.61, 6 Vpp bursts), where the
+//    Q71/Q72 pair sits flat out at each dump and the claps run together.
+//  * Q71/Q72 beta 400 (2SA733P: 200-400): the pair's base current shrinks
+//    the sawtooth's swing at Q72 less, so the claps die away faster.
+//  * C138 .07u / C139 .0163u (printed .047u / .018u): the reverb envelope
+//    rises more slowly, so it doesn't fill the gaps between the claps.
+//  * IC21: C128 = C129 5.8n (printed .0047u) puts the band-pass at ~1 kHz,
+//    as on the recording; C127 1.24n (printed .0018u) trims its high shelf.
+//  * C150 2.7n (printed .001u): less of the clap path's 1.6 kHz high-pass.
+// Of these, C138, C128/C129 and C150 are outside usual tolerances: they are
+// what the recording asks for, not readings.
 // The BA662's bias pin sits two diodes above -15 V.
 import { CircuitVoice, aTaper } from './circuit-voice.js';
 
 const VT = 0.02585;
 
 // Part values that are not plain readings of the schematic (see notes above).
-export const CP_PARTS = { C144: 0.39e-6, C140: 0.022e-6, R200: 10e3, TM3: 0.71, C127: 180e-12 };
+export const CP_PARTS = { C144: 0.37e-6, C140: 0.021e-6, R200: 10e3, TM3: 0.706, C127: 1.24e-9, C128: 5.8e-9, C138: 0.07e-6, C139: 0.0163e-6, C150: 2.7e-9, BF72: 400 };
 
 function mixer(v, m, level) {
   m.OpAmp('gnd', 'S', 'OUT');
@@ -73,7 +78,7 @@ export class CPCircuit extends CircuitVoice {
     const f = (this.s1 = this.stage(['WNc', 'L', 'Nm', 'B']));
     this.feed(f, 'WNc', 1, (i) => wn.wn[i]);
     f.R('WNc', 'L', 27e3); f.C('WNc', 'L', CP_PARTS.C127); f.R('L', 'gnd', 10e3); // R332, C127, R333
-    f.C('L', 'Nm', 0.0047e-6); f.C('L', 'B', 0.0047e-6); f.R('Nm', 'B', 100e3); // C128, C129, R334
+    f.C('L', 'Nm', CP_PARTS.C128); f.C('L', 'B', CP_PARTS.C128); f.R('Nm', 'B', 100e3); // C128, C129, R334
     f.OpAmp('gnd', 'Nm', 'B');
     // ---- S2: CP line and envelopes
     const e = (this.s2 = this.stage(['CP', 'TH', 'P15', 'E69', 'N139', 'N138', 'N143']));
@@ -81,8 +86,8 @@ export class CPCircuit extends CircuitVoice {
     e.R('CP', 'TH', 27e3); e.Rsrc('TH', 22e3, -15);              // R360, R361
     this.rail(e, 'P15', 15);
     e.NPN('CP', 'P15', 'E69');                                   // Q69
-    e.D('E69', 'N139'); e.C('N139', 'gnd', 0.018e-6);            // D69, C139
-    e.R('N139', 'N138', 1e6); e.C('N138', 'gnd', 0.047e-6);      // R348, C138
+    e.D('E69', 'N139'); e.C('N139', 'gnd', CP_PARTS.C139);            // D69, C139
+    e.R('N139', 'N138', 1e6); e.C('N138', 'gnd', CP_PARTS.C138); // R348, C138
     e.D('E69', 'N143'); e.C('N143', 'gnd', 1e-6);                // D68, C143
     // ---- S3: comparators, sawtooth and the exponential pair
     const c = (this.s3 = this.stage(['OC', 'OB', 'Dm', 'OA', 'SAW', 'Dp', 'OD', 'N141', 'B73', 'C73', 'M15']));
@@ -106,7 +111,7 @@ export class CPCircuit extends CircuitVoice {
     this.link(x, 'B71', 330e3, e, 'N143');
     this.tm = x.Rsrc('B71', 47e3, 0);                            // R370 from TM3
     x.Rsrc('EE', 15e3, 15);                                      // R366
-    x.PNP('B72', 'IA', 'EE'); x.PNP('B71', 'M15', 'EE');         // Q72, Q71
+    { const q = { Is: 2e-14, bf: CP_PARTS.BF72, br: 3 }; x.PNP('B72', 'IA', 'EE', q); x.PNP('B71', 'M15', 'EE', q); }         // Q72, Q71
     x.Rsrc('IA', 10e3, -15 + 1.2);                               // R374 into the OTA bias pin
     this.cmp = ['OC', 'OB', 'OA', 'OD'].map((n) => c.Dyn(n, null, -15));
     // ---- S4: OTA, Q70 reverb, mixer
@@ -115,7 +120,7 @@ export class CPCircuit extends CircuitVoice {
     m.C('Bc', 'K136', 0.022e-6); m.R('K136', 'I2', 39e3); m.R('I2', 'gnd', 1e3); // C136, R372, R382
     m.R('O6', 'gnd', 82e3); this.ota = m.Dyn('O6');              // R383, OTA output current
     m.OpAmp('O6', 'BUF', 'BUF');                                 // BA662 buffer
-    m.C('BUF', 'N150', 0.001e-6); m.R('N150', 'S', 100e3);       // C150, R378
+    m.C('BUF', 'N150', CP_PARTS.C150); m.R('N150', 'S', 100e3);       // C150, R378
     this.link(m, 'V', 15e3, f, 'B'); m.R('V', 'gnd', 680);       // R342, R346
     m.C('V', 'B70', 0.033e-6);                                   // C137
     this.link(m, 'B70', 1e6, e, 'N138');                         // R349

@@ -17,14 +17,14 @@ export const meta = { id: 'cp', name: 'Hand Clap', short: 'CP' };
 
 // Fitted to the circuit model (node test/fit.mjs cp ...).
 export const FIT = {
-  bpF: 1411, bpQ: 1.796,           // IC21 band-pass
-  drive: 1.581,                    // OTA input clipping
-  tooth: 0.0114, win: 0.02752,      // tooth period and comparator window, s
-  tTau: 0.01113, lTau: 0.04079,       // C144 decay inside the window / last ramp
-  expK: 1.176,                       // Q71/Q72 exponential converter steepness
-  clap: 1.86,                       // clap level, V
-  vA: 0.1426, vAtt: 0.03658, vDec: 0.394, vLp: 984.1, // reverb level, attack, decay, C146 roll-off
-  thump: 0.142,                    // sawtooth leak
+  bpF: 1256, bpQ: 1.61,           // IC21 band-pass
+  drive: 1.999,                    // OTA input clipping
+  tooth: 0.01095, win: 0.02496,      // tooth period and comparator window, s
+  tTau: 0.01186, lTau: 0.0393,       // C144 decay inside the window / last ramp
+  expK: 1.199,                       // Q71/Q72 exponential converter steepness
+  clap: 2.386,                       // clap level, V
+  vA: 0.1536, vAtt: 0.03809, vDec: 0.3815, vLp: 1021, // reverb level, attack, decay, C146 roll-off
+  thump: 0.1397,                    // sawtooth leak
 };
 
 export class CP extends Voice {

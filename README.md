@@ -114,7 +114,7 @@ differences, over 15 is clearly different (not yet checked by ear).
 | LT / MT / HT | 1.9-2.8 | 19.9 / 20.6 / 22.2 | 5.7 / 9.2 / 10.4 |
 | LC / MC / HC | 0 | 8.8 / 13.4 / 11.2 | 3.3 / 4.2 / 4.8 |
 | RS / CL | 0 | 27.8 / 24.8 | 11.6 / 11.8 |
-| CP / MA | 4.5 / 3.5 | 16.9 / 30.6 | 10.8 / 13.2 |
+| CP / MA | 4.7 / 3.5 | 16.9 / 30.6 | 9.3 / 13.2 |
 | CB | 1.2 | 26.6 | 7.1 |
 | CY | 3.7 | 22.9 | 14.8 |
 | OH / CH | 2.9 / 4.6 | 30.3 / 21.9 | 7.8 / 7.3 |
@@ -154,7 +154,7 @@ taken from the main-board accent circuit rather than solved.
 | HC | 3.4 / 10.4 | 403 | 90 ms | 3.5 / 12, 400 Hz, 80 ms |
 | RS | 2.8 / 10.7 | 459 + 1763 | 10 ms | 3 / 10, 455 + 1667 Hz, 10 ms |
 | CL | 3.2 / 9.9 | 2475 | 26 ms | 2.5 / 8, 2500 Hz, 25 ms |
-| CP | 2.1 / 5.8 | noise | 74 ms | 6 / -, 100 ms |
+| CP | 3.3 / 8.1 | noise | 74 ms | 6 / -, 100 ms |
 | MA | 4.2 / 4.9 | noise | 28 ms | 3 / 5, 30 ms |
 | CB | 3.8 / 7.6 | 547 + 809 | 110 ms | 3.5 / 12, 540 + 800 Hz, 50 ms |
 | CY | 3.0 / 7.0 | metal | 454 ms | 3.5 / 7, 800 ms |
@@ -168,24 +168,22 @@ Known misses (2026-11-04, after adding R53, the 1k load on the metal bus that
 had been left out): OH runs ~1.5x hot and CY's normal hit decays in ~450 ms
 against 800; CB rings longer than the table says (CB checked 2026-11-04 against Werner et al., "More Cowbell",
 AES 2014: the circuit itself gives the longer two-stage decay and the 2x
-accent); CP is quieter than the table (2.1 Vpp against 6, see below); BD
+accent); CP is quieter than the table (3.3 Vpp against 6, see below); BD
 settles 12% flat.
 
-CP was set against the real TR-808 recording on 2026-11-06 (it sounded
-clearly off). As printed, the circuit gave three smeared claps ~13 ms apart,
-a much brighter sound than the recording and a reverb tail that died too
-early. Now: R200 10k from Q70's emitter to -15 V is added (the schematic's
-"PORTION CHANGED" note, missed before); C144 .39u (an electrolytic printed
-.47u, within tolerance) gives the recording's 11.5 ms spacing; C140 .022u
-places the fourth clap; TM3 at 0.71 lets each clap die away at once instead
-of holding for ~4 ms; C127 180p (printed .0018u; fitted alone it lands on
-181 pF, so likely a slipped decimal) takes away the IC21 high shelf. Distance
-to the recording (`node test/vs808.mjs cp`) went from 25.4 to 10.4, synth
-from 16.7 to 13.9. The price is level: the manual's 6 Vpp TM3 setting can't
-also give the recording's clap shape. `node test/cp-score.mjs` prints the
-envelope and spectrum next to the recording; `node test/cp-fit.mjs <parts>`
-refits; `node test/cp-probe.mjs` shows the comparators, sawtooth and OTA
-current through one hit.
+CP is set against the real TR-808 recording (2026-11-06, two passes; it
+sounded clearly off). As printed, the circuit gave three smeared claps ~13 ms
+apart, a brighter sound than the recording and a reverb tail that died too
+early. R200 10k from Q70's emitter to -15 V is added (the schematic's
+"PORTION CHANGED" note, missed before); nine more values are fitted to the
+recording and listed in `CP_PARTS` (voices/cpma-circuit.js), several outside
+normal tolerances. Distance to the recording (`node test/vs808.mjs cp`):
+circuit 25.4 -> 7.2, synth 16.7 -> 10.9; the floor (the circuit against
+itself with other noise) is ~4.7. Accented hits still run the claps together
+more than normal ones (the sample set has no accented clap to fit against).
+`node test/cp-score.mjs` prints the envelope and spectrum next to the
+recording; `node test/cp-fit.mjs <parts>` refits; `node test/cp-probe.mjs`
+shows the comparators, sawtooth and OTA current through one hit.
 
 SD uses the schematic's "PORTION CHANGED" values (C58 .056u, C61 .015u, R191
 10k, R200 shorted) by default; set `SD_REVISION = 'original'` in
