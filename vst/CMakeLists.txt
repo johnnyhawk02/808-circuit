@@ -112,8 +112,8 @@ if(APPLE)
   add_custom_target(T8Install
     COMMAND ${CMAKE_COMMAND} -E make_directory "$ENV{HOME}/Library/Audio/Plug-Ins/VST3" "$ENV{HOME}/Library/Audio/Plug-Ins/Components"
     COMMAND ${CMAKE_COMMAND} -E rm -rf "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_PROPERTY:EightOEightCircuit_VST3,JUCE_PLUGIN_ARTEFACT_FILE>" "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_PROPERTY:EightOEightCircuit_AU,JUCE_PLUGIN_ARTEFACT_FILE>" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>" "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_AU,JUCE_PLUGIN_ARTEFACT_FILE>>" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
     DEPENDS EightOEightCircuit_VST3 EightOEightCircuit_AU
     VERBATIM)
 endif()

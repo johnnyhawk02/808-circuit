@@ -22,12 +22,13 @@ The web app (`elixir/`, at the site's root) as a JUCE plugin, the same in every 
 
 ## Build
 
-Needs CMake 3.22+ and a C++17 compiler (Xcode on macOS). JUCE 8.0.10 is fetched.
+Needs CMake 3.22+ and a C++17 compiler (on macOS the Command Line Tools are enough; Xcode works too). JUCE 8.0.10
+is fetched.
 
 ```sh
 cd vst
-cmake -B build -G Xcode            # or -G Ninja; on macOS this builds universal (arm64 + x86_64)
-cmake --build build --config Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release     # (or -G Xcode); on macOS this builds universal (arm64 + x86_64)
+cmake --build build --config Release -j8
 cmake --build build --config Release --target T8Install   # macOS: copies the VST3 and AU to ~/Library/Audio/Plug-Ins
 ```
 
