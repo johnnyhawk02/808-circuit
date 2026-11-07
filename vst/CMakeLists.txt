@@ -32,7 +32,7 @@ endif()
 
 juce_add_plugin(EightOEightCircuit
   PRODUCT_NAME "808 Circuit"
-  COMPANY_NAME "johnnyhawk"
+  COMPANY_NAME "Johnny Hawk"
   BUNDLE_ID org.johnnyhawk.808circuit
   PLUGIN_MANUFACTURER_CODE Jhwk
   PLUGIN_CODE E8c1
