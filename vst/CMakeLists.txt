@@ -116,11 +116,14 @@ endforeach()
 
 # macOS: install the built plugins for the user (cmake --build build --target T8Install)
 if(APPLE)
+  # (the VST3 in a Johnny Hawk folder; Audio Units must sit at the top of Components)
+  set(T8_VST3_DIR "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Johnny Hawk")
   add_custom_target(T8Install
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$ENV{HOME}/Library/Audio/Plug-Ins/VST3" "$ENV{HOME}/Library/Audio/Plug-Ins/Components"
-    COMMAND ${CMAKE_COMMAND} -E rm -rf "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>" "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${T8_VST3_DIR}" "$ENV{HOME}/Library/Audio/Plug-Ins/Components"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3" "${T8_VST3_DIR}/808 Circuit.vst3" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>" "${T8_VST3_DIR}/808 Circuit.vst3"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_AU,JUCE_PLUGIN_ARTEFACT_FILE>>" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
+    COMMAND killall -9 AudioComponentRegistrar || true
     DEPENDS EightOEightCircuit_VST3 EightOEightCircuit_AU
     VERBATIM)
 endif()

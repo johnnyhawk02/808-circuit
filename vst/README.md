@@ -29,7 +29,7 @@ is fetched.
 cd vst
 cmake -B build -DCMAKE_BUILD_TYPE=Release     # (or -G Xcode); on macOS this builds universal (arm64 + x86_64)
 cmake --build build --config Release -j8
-cmake --build build --config Release --target T8Install   # macOS: copies the VST3 and AU to ~/Library/Audio/Plug-Ins
+cmake --build build --config Release --target T8Install   # macOS: copies the VST3 (to VST3/Johnny Hawk) and AU to ~/Library/Audio/Plug-Ins
 ```
 
 The bundles carry the page and what it loads in `Contents/Resources/app` (the built `elixir/index.html`, its IRs,
