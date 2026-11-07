@@ -467,9 +467,12 @@ void Player::render(std::array<std::array<float, 64>, 2>& dst) {
         int16_t* bo = busOut.data(); busOut.fill(0);
         dist.process(bo, 64);
         const double m0 = distAt, m1 = distMix;
+        // the wet's DC blocker (one pole, 10 Hz): the tube and fold types put out a constant offset even on silence
+        const double a = 1 - 2 * 3.14159265358979323846 * 10 / REAL_FS;
         for (int i = 0; i < 64; i++) {
-            const double m = m0 + (m1 - m0) * (i + 1) / 64;
-            L[i] = (float) (L[i] + (bo[2 * i] / 32768.0 - L[i]) * m); R[i] = (float) (R[i] + (bo[2 * i + 1] / 32768.0 - R[i]) * m);
+            const double m = m0 + (m1 - m0) * (i + 1) / 64, wl = bo[2 * i] / 32768.0, wr = bo[2 * i + 1] / 32768.0;
+            distDc[2] = wl - distDc[0] + a * distDc[2]; distDc[0] = wl; distDc[3] = wr - distDc[1] + a * distDc[3]; distDc[1] = wr;
+            L[i] = (float) (L[i] + (distDc[2] - L[i]) * m); R[i] = (float) (R[i] + (distDc[3] - R[i]) * m);
         }
         distAt = m1;
     }

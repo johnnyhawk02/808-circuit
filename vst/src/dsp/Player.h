@@ -79,7 +79,7 @@ private:
     double delayPos; bool echoSync = true; double echoFree = 0.25, echoFine = 0;
     lxr::FxBus dist; IrVerb verb; std::array<float, 64> verbIn {};
     std::array<float, 6> sendD {}, sendR {}; double echoWidth = 1;
-    double distMix = 0, distAt = 0;
+    double distMix = 0, distAt = 0; std::array<double, 4> distDc {}; // (the wet's DC blocker: last in L, R, out L, R)
     std::array<float, 128> busIn {}; std::array<int16_t, 128> busOut {};
     double duckEnv = 0, duckAt = 1, compEnv = 0, gr = 0, duckMin = 1;
     std::array<float, 6> lvl {}; int lvlN = 0; bool lvlOn = false;
