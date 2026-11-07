@@ -258,7 +258,7 @@ class Player {
     this.verb = new IrVerb(LXR.REAL_FS); this.verbIn = new Float32Array(64);
     this.fxRng = new LXR.Rng(0x2545f491);
     this.sendD = new Float32Array(6); this.sendR = new Float32Array(6); this.echoWidth = 1;
-    this.distMix = 0; this.distAt = 0;
+    this.distMix = 0; this.distAt = 0; this.distDc = new Float64Array(4); // (the wet's DC blocker: last in L, R, out L, R)
     this.busIn = new Float32Array(128); this.busOut = new Int16Array(128);
     this.duckEnv = 0; this.duckAt = 1; this.compEnv = 0; this.gr = 0; this.duckMin = 1;
     // level meters: each voice's peak after its fader, accent, mute and duck
@@ -657,7 +657,14 @@ class Player {
       const bo = this.busOut; bo.fill(0);
       this.dist.process(bo, 64, this.fxRng);
       const m0 = this.distAt, m1 = this.distMix;
-      for (let i = 0; i < 64; i++) { const m = m0 + (m1 - m0) * (i + 1) / 64; L[i] += (bo[2 * i] / 32768 - L[i]) * m; R[i] += (bo[2 * i + 1] / 32768 - R[i]) * m; }
+      // the tube and fold types put out a constant offset even on silence (the tube's bias, the fold's colour), so the
+      // wet goes through a DC blocker (one pole, 10 Hz) before the blend: otherwise the mix sits off zero while stopped
+      const dc = this.distDc, a = 1 - 2 * Math.PI * 10 / LXR.REAL_FS;
+      for (let i = 0; i < 64; i++) {
+        const m = m0 + (m1 - m0) * (i + 1) / 64, wl = bo[2 * i] / 32768, wr = bo[2 * i + 1] / 32768;
+        dc[2] = wl - dc[0] + a * dc[2]; dc[0] = wl; dc[3] = wr - dc[1] + a * dc[3]; dc[1] = wr;
+        L[i] += (dc[2] - L[i]) * m; R[i] += (dc[3] - R[i]) * m;
+      }
       this.distAt = m1;
     }
     if (this.rush > S.hp || this.hpOn) this.highPass(L, R);
