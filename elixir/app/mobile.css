@@ -140,6 +140,8 @@ body { padding: max(6px, env(safe-area-inset-top, 0px)) max(6px, env(safe-area-i
 .m-title { font-family: var(--display); font-size: 1.5rem; font-weight: 400; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
 .m-ver-v { font-style: normal; }
 .m-ver { margin-left: .5em; font-size: .7em; letter-spacing: .06em; text-transform: none; opacity: .7; }
+.m-loading { margin-left: .8em; font-size: .7em; letter-spacing: .06em; text-transform: none; opacity: .8; animation: g8rec 1s steps(2) infinite; }
+.m-loading[hidden] { display: none; }
 .m-userbtn, .m-top .m-setbtn:not(.m-helpbtn) { margin-right: 4px !important; }
 .m-helpbtn { margin-right: auto; font-size: min(var(--fs-xs), 3.6vw, 15px) !important; letter-spacing: .02em; white-space: nowrap; }
 .m-help-short { display: none; }

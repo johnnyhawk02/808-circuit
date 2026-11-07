@@ -146,7 +146,8 @@ export class CircuitVoice extends Voice {
       for (let i = 0, n = Math.round(warmSecs * this.sr); i < n; i++) { bank.render(1); this._tick(0); }
       this._mc = null;
     }
-    this.idle = 1e9;
+    // settled: asleep until its first trigger (sixteen awake circuits at once overload the audio at start-up)
+    this.idle = 1e9; this.quiet = 1e9;
   }
   _feed(c, i) { for (const s of c.feeds) s.v = s.get(i); }
   _tick(i) {

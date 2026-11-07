@@ -454,6 +454,8 @@ class Player {
   hit(t, vel, acc, lane) {
     const id = this.k808 && (lane || this.t808[t]);
     if (!id) return;
+    // a voice set to cached whose hits are still loading stays silent (rather than playing the synth model meanwhile)
+    if ((this.want808[id] || 'cached') === 'cached' && this.k808.model[id] !== 'cached') return;
     this.k808._fire(id, acc ? 1 : 0);
     // the 808 voice takes the track's pan as the LXR voice would on its trigger
     const e = this.e, v = [e.drums[0], e.drums[1], e.drums[2], e.snare, e.cymbal, e.hat][Math.min(t, 5)];

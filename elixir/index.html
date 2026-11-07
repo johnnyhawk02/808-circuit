@@ -1015,6 +1015,8 @@ body { padding: max(6px, env(safe-area-inset-top, 0px)) max(6px, env(safe-area-i
 .m-title { font-family: var(--display); font-size: 1.5rem; font-weight: 400; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
 .m-ver-v { font-style: normal; }
 .m-ver { margin-left: .5em; font-size: .7em; letter-spacing: .06em; text-transform: none; opacity: .7; }
+.m-loading { margin-left: .8em; font-size: .7em; letter-spacing: .06em; text-transform: none; opacity: .8; animation: g8rec 1s steps(2) infinite; }
+.m-loading[hidden] { display: none; }
 .m-userbtn, .m-top .m-setbtn:not(.m-helpbtn) { margin-right: 4px !important; }
 .m-helpbtn { margin-right: auto; font-size: min(var(--fs-xs), 3.6vw, 15px) !important; letter-spacing: .02em; white-space: nowrap; }
 .m-help-short { display: none; }
@@ -1766,7 +1768,7 @@ html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout
 
 <main class="m" id="m">
   <header class="m-top">
-    <b class="m-title" id="m-title"><span class="m-title-long">808 circuit</span><span class="m-title-short" aria-hidden="true"></span><small class="m-ver"><i class="m-ver-v">v</i><!--v-->1.2<!--/v--></small></b>
+    <b class="m-title" id="m-title"><span class="m-title-long">808 circuit</span><span class="m-title-short" aria-hidden="true"></span><small class="m-ver"><i class="m-ver-v">v</i><!--v-->1.52<!--/v--></small><small class="m-loading" id="m-loading" hidden>caching sounds…</small></b>
     <button class="m-toggle m-setbtn m-optsbtn" id="m-opts" type="button" aria-label="Options">options</button>
     <button class="m-toggle m-setbtn m-userbtn" id="m-user-open" type="button" aria-label="User settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></button>
     <button class="m-toggle m-setbtn" id="m-set-open" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
@@ -1863,7 +1865,7 @@ html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout
         <button class="m-btn" id="m-pexport" type="button" title="Saves your presets, the built-in ones you saved over and every starred one, to a file">export presets</button>
         <button class="m-btn m-install" id="m-install" type="button" hidden>install app</button>
       </div>
-      <footer class="m-foot">Erica Synths LXR-02 port, GPL-3.0, unofficial<br><a href="help.html">Help</a> · <a href="https://github.com/johnnyhawk02/elixir-desktop">Source</a> · v<!--v-->1.2<!--/v-->, 7 Nov, 06:49</footer>
+      <footer class="m-foot">Erica Synths LXR-02 port, GPL-3.0, unofficial<br><a href="help.html">Help</a> · <a href="https://github.com/johnnyhawk02/elixir-desktop">Source</a> · v<!--v-->1.52<!--/v-->, 7 Nov, 09:13</footer>
     </section>
   </div>
   </div>
@@ -7448,7 +7450,8 @@ class CircuitVoice extends Voice {
       for (let i = 0, n = Math.round(warmSecs * this.sr); i < n; i++) { bank.render(1); this._tick(0); }
       this._mc = null;
     }
-    this.idle = 1e9;
+    // settled: asleep until its first trigger (sixteen awake circuits at once overload the audio at start-up)
+    this.idle = 1e9; this.quiet = 1e9;
   }
   _feed(c, i) { for (const s of c.feeds) s.v = s.get(i); }
   _tick(i) {
@@ -10075,6 +10078,8 @@ class Player {
   hit(t, vel, acc, lane) {
     const id = this.k808 && (lane || this.t808[t]);
     if (!id) return;
+    // a voice set to cached whose hits are still loading stays silent (rather than playing the synth model meanwhile)
+    if ((this.want808[id] || 'cached') === 'cached' && this.k808.model[id] !== 'cached') return;
     this.k808._fire(id, acc ? 1 : 0);
     // the 808 voice takes the track's pan as the LXR voice would on its trigger
     const e = this.e, v = [e.drums[0], e.drums[1], e.drums[2], e.snare, e.cymbal, e.hat][Math.min(t, 5)];
@@ -14601,10 +14606,19 @@ async function t8LoadCached(id) {
       if (t8Custom[id]) return; // a cache press finished meanwhile and sent its own
       send({ type: 'cache808', id, info, pcm });
       t8Sent.add(id);
-    })().catch((err) => { console.warn('808 cache load failed', id, err); delete t8Loading[id]; t8Missing.add(id); t8Draw(); });
+    })().catch((err) => {
+      console.warn('808 cache load failed', id, err); delete t8Loading[id]; t8Missing.add(id);
+      send({ type: 'model808', id, model: 'behavioural' }); // no hits: the synth model plays instead of silence
+      t8Draw();
+    });
+    t8LoadingShow(1);
     await t8Loading[id];
+    t8LoadingShow(-1);
   }
 }
+// "caching sounds…" by the title while any voice's hits are loading (those voices are silent until then)
+let t8Pending = 0;
+function t8LoadingShow(d) { t8Pending += d; const el = document.getElementById('m-loading'); if (el) el.hidden = t8Pending <= 0; }
 const t8Missing = new Set(); // shipped hits that couldn't be fetched: cached falls back to the synth model
 function t8SetModel(id, m) {
   t8.models[id] = m; t8Save();

@@ -58,10 +58,19 @@ async function t8LoadCached(id) {
       if (t8Custom[id]) return; // a cache press finished meanwhile and sent its own
       send({ type: 'cache808', id, info, pcm });
       t8Sent.add(id);
-    })().catch((err) => { console.warn('808 cache load failed', id, err); delete t8Loading[id]; t8Missing.add(id); t8Draw(); });
+    })().catch((err) => {
+      console.warn('808 cache load failed', id, err); delete t8Loading[id]; t8Missing.add(id);
+      send({ type: 'model808', id, model: 'behavioural' }); // no hits: the synth model plays instead of silence
+      t8Draw();
+    });
+    t8LoadingShow(1);
     await t8Loading[id];
+    t8LoadingShow(-1);
   }
 }
+// "caching sounds…" by the title while any voice's hits are loading (those voices are silent until then)
+let t8Pending = 0;
+function t8LoadingShow(d) { t8Pending += d; const el = document.getElementById('m-loading'); if (el) el.hidden = t8Pending <= 0; }
 const t8Missing = new Set(); // shipped hits that couldn't be fetched: cached falls back to the synth model
 function t8SetModel(id, m) {
   t8.models[id] = m; t8Save();
