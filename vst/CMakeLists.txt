@@ -105,6 +105,13 @@ foreach(fmt ${T8_FORMATS})
     COMMAND ${CMAKE_COMMAND} -E make_directory "${res}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${T8_STAGE} "${res}"
     VERBATIM)
+  if(APPLE)
+    # (the resources went in after the linker signed the bundle, which breaks its seal and hosts such as Live refuse
+    # it: sign it again, ad hoc, with them in)
+    add_custom_command(TARGET ${tgt} POST_BUILD
+      COMMAND codesign --force --deep --sign - "$<TARGET_FILE_DIR:${tgt}>/../.."
+      VERBATIM)
+  endif()
 endforeach()
 
 # macOS: install the built plugins for the user (cmake --build build --target T8Install)
