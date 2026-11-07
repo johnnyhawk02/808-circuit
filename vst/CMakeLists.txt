@@ -123,7 +123,6 @@ if(APPLE)
     COMMAND ${CMAKE_COMMAND} -E rm -rf "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/808 Circuit.vst3" "${T8_VST3_DIR}/808 Circuit.vst3" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>" "${T8_VST3_DIR}/808 Circuit.vst3"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "$<GENEX_EVAL:$<TARGET_PROPERTY:EightOEightCircuit_AU,JUCE_PLUGIN_ARTEFACT_FILE>>" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/808 Circuit.component"
-    COMMAND killall -9 AudioComponentRegistrar || true
     DEPENDS EightOEightCircuit_VST3 EightOEightCircuit_AU
     VERBATIM)
 endif()
