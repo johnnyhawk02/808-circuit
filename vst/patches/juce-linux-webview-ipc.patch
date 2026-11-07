@@ -1,0 +1,69 @@
+diff --git a/modules/juce_gui_extra/native/juce_WebBrowserComponent_linux.cpp b/modules/juce_gui_extra/native/juce_WebBrowserComponent_linux.cpp
+index f2e8a95..40dd0e0 100644
+--- a/modules/juce_gui_extra/native/juce_WebBrowserComponent_linux.cpp
++++ b/modules/juce_gui_extra/native/juce_WebBrowserComponent_linux.cpp
+@@ -465,16 +465,30 @@ public:
+         for (;;)
+         {
+             char lengthBytes[sizeof (size_t)]{};
+-            const auto numLengthBytes = readIntoBuffer (lengthBytes);
++            auto numLengthBytes = readIntoBuffer (lengthBytes);
+ 
+-            if (numLengthBytes != std::size (lengthBytes))
++            if (numLengthBytes == 0)
+                 break;
+ 
++            if (numLengthBytes != std::size (lengthBytes))
++            {
++                setBlocking (inChannel, true);
++                numLengthBytes += readIntoBuffer (Span<char> (lengthBytes + numLengthBytes, std::size (lengthBytes) - numLengthBytes));
++                setBlocking (inChannel, false);
++
++                if (numLengthBytes != std::size (lengthBytes))
++                    break;
++            }
++
+             const auto numBytesExpected = readUnaligned<size_t> (lengthBytes);
+             buffer.reserve (numBytesExpected + 1);
+             buffer.resize (numBytesExpected);
+ 
+-            if (readIntoBuffer (buffer) != numBytesExpected)
++            setBlocking (inChannel, true);
++            const auto numBody = readIntoBuffer (buffer);
++            setBlocking (inChannel, false);
++
++            if (numBody != numBytesExpected)
+                 break;
+ 
+             buffer.push_back (0);
+@@ -499,7 +513,7 @@ public:
+ 
+         auto json = JSON::toString (var (obj.get()));
+ 
+-        auto jsonLength = static_cast<size_t> (json.length());
++        auto jsonLength = static_cast<size_t> (json.getNumBytesAsUTF8());
+         auto len        = sizeof (size_t) + jsonLength;
+ 
+         HeapBlock<char> buffer (len);
+@@ -511,13 +525,18 @@ public:
+         memcpy (dst, json.toRawUTF8(), jsonLength);
+ 
+         ssize_t ret;
++        size_t remaining = len;
+ 
+         for (;;)
+         {
+-            ret = write (outChannel, buffer.getData(), len);
++            ret = write (outChannel, buffer.getData() + (len - remaining), remaining);
+ 
+-            if (ret != -1 || errno != EINTR)
+-                break;
++            if (ret > 0) { remaining -= (size_t) ret; if (remaining == 0) break; continue; }
++
++            if (ret == -1 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
++                continue;
++
++            break;
+         }
+     }
+ 
